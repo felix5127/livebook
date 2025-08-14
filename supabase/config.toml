@@ -1,0 +1,41 @@
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+port = 54320
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+jwt_secret = "super-secret-jwt-token-with-at-least-32-characters-long"
+enable_signup = true
+enable_confirmations = false
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[db]
+port = 54322
+
+[functions]
+enabled = true
+port = 54323
+
+[realtime]
+enabled = true
+port = 54324
+
+[studio]
+enabled = true
+port = 54325
+
+[inbucket]
+enabled = true
+port = 54326
+smtp_port = 54327
+pop3_port = 54328
