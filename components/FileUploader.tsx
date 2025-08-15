@@ -347,7 +347,7 @@ export default function FileUploader({
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                {isUploading ? '上传中...' : '开始转写'}
+                {isUploading ? '上传中...' : '生成笔记'}
               </button>
             </div>
           )}
@@ -394,7 +394,7 @@ export default function FileUploader({
               'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
           >
-            {isUploading ? '处理中...' : '开始转写'}
+            {isUploading ? '处理中...' : '生成笔记'}
           </button>
           
           <p className="text-xs text-gray-500 dark:text-gray-400">

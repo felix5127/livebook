@@ -183,21 +183,21 @@ export class DashScopeClient {
         // 获取说话人数量
         const speakers = new Set(
           transcript.sentences
-            .filter(s => s.speaker_id !== undefined)
-            .map(s => s.speaker_id.toString())
+            .filter((s: any) => s.speaker_id !== undefined)
+            .map((s: any) => s.speaker_id.toString())
         );
 
         // 转换为应用内部格式
-        const segments: TranscriptionSegment[] = transcript.sentences.map((sentence, index) => ({
+        const segments: TranscriptionSegment[] = transcript.sentences.map((sentence: any, index: number) => ({
           id: `segment_${index}`,
           start_time: sentence.begin_time,
           end_time: sentence.end_time,
           text: sentence.text,
           speaker_id: sentence.speaker_id?.toString() || 'unknown',
           confidence: sentence.words.length > 0 
-            ? sentence.words.reduce((sum, word) => sum + (word.confidence || 1), 0) / sentence.words.length 
+            ? sentence.words.reduce((sum: number, word: any) => sum + (word.confidence || 1), 0) / sentence.words.length 
             : 1, // 新API格式可能没有confidence字段
-          words: sentence.words.map(word => ({
+          words: sentence.words.map((word: any) => ({
             text: word.text,
             start_time: word.begin_time,
             end_time: word.end_time,

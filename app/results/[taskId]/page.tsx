@@ -220,7 +220,7 @@ export default function ResultsPage() {
               }`}>
                 {result?.status === 'completed' ? '转写完成' 
                  : result?.status === 'failed' ? '转写失败'
-                 : result?.status === 'processing' ? '转写中'
+                 : result?.status === 'processing' ? '处理中'
                  : '等待中'}
               </span>
             </div>
@@ -324,7 +324,7 @@ export default function ResultsPage() {
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6 text-center">
             <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
             <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100 mb-2">
-              正在转写中...
+              正在处理中...
             </h3>
             <p className="text-blue-700 dark:text-blue-300">
               这可能需要几分钟时间，页面会自动刷新显示最新状态

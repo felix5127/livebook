@@ -23,12 +23,43 @@ interface ProcessingTask {
   startTime: string;
 }
 
+// 生成智能标题（与详情页保持一致）
+const generateSmartTitle = (fileName: string) => {
+  // 移除扩展名
+  const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
+  
+  // 根据文件名关键词生成标题
+  if (nameWithoutExt.includes('强化学习') || nameWithoutExt.includes('机器学习') || nameWithoutExt.includes('深度学习')) {
+    return '机器学习技术讨论';
+  }
+  if (nameWithoutExt.includes('清华大学') || nameWithoutExt.includes('大学') || nameWithoutExt.includes('课程')) {
+    return '学术课程讲座';
+  }
+  if (nameWithoutExt.includes('产品') || nameWithoutExt.includes('设计') || nameWithoutExt.includes('用户')) {
+    return '产品设计会议';
+  }
+  if (nameWithoutExt.includes('技术') || nameWithoutExt.includes('开发') || nameWithoutExt.includes('编程')) {
+    return '技术开发讨论';
+  }
+  if (nameWithoutExt.includes('会议') || nameWithoutExt.includes('讨论') || nameWithoutExt.includes('交流')) {
+    return '工作会议记录';
+  }
+  
+  // 如果文件名过长，截取前15个字符
+  if (nameWithoutExt.length > 15) {
+    return nameWithoutExt.substring(0, 15) + '...';
+  }
+  
+  return nameWithoutExt || '音频内容摘要';
+};
+
 export default function HomePage() {
   const router = useRouter();
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [showUploader, setShowUploader] = useState(false);
   const [processingTasks, setProcessingTasks] = useState<ProcessingTask[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [activePolls, setActivePolls] = useState<Set<string>>(new Set());
 
   // 从localStorage加载数据
   useEffect(() => {
@@ -114,6 +145,55 @@ export default function HomePage() {
     }
   }, [notebooks, isLoaded]);
 
+  // 更新现有笔记本的标题（基于转写内容）
+  const updateNotebookTitle = async (notebookId: string) => {
+    try {
+      const response = await fetch(`/api/tasks/${notebookId}`);
+      const data = await response.json();
+      
+      if (data.success && data.data.transcriptContent) {
+        const segments = data.data.transcriptContent.transcripts?.[0]?.sentences;
+        if (segments && segments.length > 0) {
+          // 提取前几句话的文本内容
+          const firstSegments = segments.slice(0, 3);
+          const combinedText = firstSegments.map((s: any) => s.text).join('');
+          
+          // 移除标点符号和空格
+          const cleanText = combinedText.replace(/[，。！？；：""''（）【】]/g, '').trim();
+          
+          // 根据内容关键词生成标题
+          let newTitle = '';
+          if (cleanText.includes('强化学习') || cleanText.includes('机器学习') || cleanText.includes('深度学习')) {
+            newTitle = '机器学习技术讨论';
+          } else if (cleanText.includes('清华大学') || cleanText.includes('大学') || cleanText.includes('课程')) {
+            newTitle = '学术课程讲座';
+          } else if (cleanText.includes('产品') || cleanText.includes('设计') || cleanText.includes('用户')) {
+            newTitle = '产品设计会议';
+          } else if (cleanText.includes('技术') || cleanText.includes('算法') || cleanText.includes('系统')) {
+            newTitle = '技术研讨会';
+          } else if (cleanText.includes('会议') || cleanText.includes('讨论') || cleanText.includes('分享')) {
+            newTitle = '团队讨论会议';
+          } else if (cleanText.length > 15) {
+            newTitle = cleanText.substring(0, 15) + '...';
+          } else {
+            newTitle = cleanText || '音频内容摘要';
+          }
+          
+          // 更新笔记本标题
+          setNotebooks(prev => prev.map(notebook => 
+            notebook.id === notebookId 
+              ? { ...notebook, title: newTitle }
+              : notebook
+          ));
+          
+          console.log('[首页] 更新笔记本标题:', newTitle, 'ID:', notebookId);
+        }
+      }
+    } catch (error) {
+      console.error('[首页] 更新标题失败:', error);
+    }
+  };
+
   const handleFileUpload = async (file: File, taskId?: string) => {
     console.log('文件上传完成:', file.name, 'TaskId:', taskId);
     
@@ -159,6 +239,15 @@ export default function HomePage() {
 
   // 轮询任务状态
   const pollTaskStatus = async (taskId: string, localTaskId: string) => {
+    // 防止重复轮询同一个任务
+    if (activePolls.has(taskId)) {
+      console.log('[首页] 跳过重复轮询:', taskId);
+      return;
+    }
+    
+    setActivePolls(prev => new Set(prev).add(taskId));
+    console.log('[首页] 开始轮询任务:', taskId);
+    
     const checkStatus = async () => {
       try {
         const response = await fetch(`/api/tasks/${taskId}`);
@@ -181,23 +270,101 @@ export default function HomePage() {
             setProcessingTasks(prev => {
               const task = prev.find(t => t.id === localTaskId);
               if (task) {
-                const newNotebook: Notebook = {
-                  id: taskId,
-                  title: task.fileName,
-                  description: '转写已完成，点击查看详情',
-                  createdAt: new Date().toLocaleDateString('zh-CN'),
-                  status: 'completed'
+                // 获取转写结果来生成智能标题
+                const generateTitleFromTranscript = async () => {
+                  try {
+                    // 获取转写数据
+                    const transcriptResponse = await fetch(`/api/tasks/${taskId}`);
+                    const transcriptData = await transcriptResponse.json();
+                    
+                    if (transcriptData.success && transcriptData.data.transcriptContent) {
+                      const segments = transcriptData.data.transcriptContent.transcripts?.[0]?.sentences;
+                      if (segments && segments.length > 0) {
+                        // 提取前几句话的文本内容
+                        const firstSegments = segments.slice(0, 3);
+                        const combinedText = firstSegments.map((s: any) => s.text).join('');
+                        
+                        // 移除标点符号和空格
+                        const cleanText = combinedText.replace(/[，。！？；：""''（）【】]/g, '').trim();
+                        
+                        // 根据内容关键词生成标题
+                        if (cleanText.includes('强化学习') || cleanText.includes('机器学习') || cleanText.includes('深度学习')) {
+                          return '机器学习技术讨论';
+                        }
+                        if (cleanText.includes('清华大学') || cleanText.includes('大学') || cleanText.includes('课程')) {
+                          return '学术课程讲座';
+                        }
+                        if (cleanText.includes('产品') || cleanText.includes('设计') || cleanText.includes('用户')) {
+                          return '产品设计会议';
+                        }
+                        if (cleanText.includes('技术') || cleanText.includes('算法') || cleanText.includes('系统')) {
+                          return '技术研讨会';
+                        }
+                        if (cleanText.includes('会议') || cleanText.includes('讨论') || cleanText.includes('分享')) {
+                          return '团队讨论会议';
+                        }
+                        
+                        // 如果没有匹配到关键词，截取前15个字符作为标题
+                        if (cleanText.length > 15) {
+                          return cleanText.substring(0, 15) + '...';
+                        }
+                        
+                        return cleanText || generateSmartTitle(task.fileName);
+                      }
+                    }
+                  } catch (error) {
+                    console.error('[首页] 获取转写内容失败:', error);
+                  }
+                  
+                  // 降级到基于文件名的标题生成
+                  return generateSmartTitle(task.fileName);
                 };
-                setNotebooks(notebooks => [newNotebook, ...notebooks]);
+                
+                // 异步生成标题并创建笔记本
+                generateTitleFromTranscript().then(title => {
+                  setNotebooks(currentNotebooks => {
+                    // 检查是否已经存在相同的笔记本（避免重复）
+                    const existingNotebook = currentNotebooks.find(nb => nb.id === taskId);
+                    if (!existingNotebook) {
+                      const newNotebook: Notebook = {
+                        id: taskId,
+                        title: title,
+                        description: '转写已完成，点击查看详情',
+                        createdAt: new Date().toLocaleDateString('zh-CN'),
+                        status: 'completed'
+                      };
+                      console.log('[首页] 创建新笔记本:', newNotebook.title, 'ID:', taskId);
+                      return [newNotebook, ...currentNotebooks];
+                    } else {
+                      console.log('[首页] 笔记本已存在，跳过创建:', taskId);
+                      return currentNotebooks;
+                    }
+                  });
+                });
+                
                 return prev.filter(t => t.id !== localTaskId);
               }
               return prev;
             });
+            // 清理轮询状态
+            setActivePolls(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(taskId);
+              return newSet;
+            });
+            console.log('[首页] 任务完成，停止轮询:', taskId);
             return; // 停止轮询
           }
           
           // 如果失败，更新状态并停止轮询
           if (status === 'failed') {
+            // 清理轮询状态
+            setActivePolls(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(taskId);
+              return newSet;
+            });
+            console.log('[首页] 任务失败，停止轮询:', taskId);
             return;
           }
           
@@ -251,7 +418,7 @@ export default function HomePage() {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'completed': return '已完成';
-      case 'processing': return '转写中';
+      case 'processing': return '处理中';
       case 'failed': return '失败';
       default: return '未知';
     }
@@ -270,7 +437,7 @@ export default function HomePage() {
               </h1>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center">
               <button 
                 onClick={clearAllData}
                 className="p-2 text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-100"
@@ -278,10 +445,6 @@ export default function HomePage() {
               >
                 <Settings className="w-5 h-5" />
               </button>
-              <span className="text-sm text-gray-500">设置</span>
-              <div className="flex items-center space-x-2 bg-black text-white px-3 py-1 rounded-full text-sm">
-                <span>PRO</span>
-              </div>
             </div>
           </div>
         </div>
@@ -323,12 +486,14 @@ export default function HomePage() {
                 {/* 标题和描述 */}
                 <div className="flex-1">
                   <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2">
-                    {task.fileName}
+                    {task.status === 'processing' || task.status === 'pending' 
+                      ? '新建笔记...' 
+                      : generateSmartTitle(task.fileName)}
                   </h3>
                   <p className="text-sm text-gray-600 mb-4">
-                    {task.status === 'processing' ? '正在转写中...' : 
+                    {task.status === 'processing' ? '处理中...' : 
                      task.status === 'pending' ? '等待处理...' : 
-                     task.status === 'failed' ? '转写失败' : '处理中'}
+                     task.status === 'failed' ? '处理失败' : '处理中'}
                   </p>
                 </div>
                 
@@ -355,7 +520,11 @@ export default function HomePage() {
             {notebooks.map((notebook) => (
               <div
                 key={notebook.id}
-                onClick={() => router.push(`/notebook/${notebook.id}`)}
+                onClick={() => {
+                  // 在跳转前更新标题
+                  updateNotebookTitle(notebook.id);
+                  router.push(`/notebook/${notebook.id}`);
+                }}
                 className="bg-gray-100 rounded-lg p-6 hover:bg-gray-200 cursor-pointer transition-colors min-h-[200px] flex flex-col relative group"
               >
                 {/* 删除按钮 */}
