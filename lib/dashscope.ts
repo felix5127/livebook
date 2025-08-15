@@ -160,11 +160,11 @@ export class DashScopeClient {
     const result = taskStatus.output.results[0];
     
     // 新的API格式返回transcription_url，需要额外请求获取转写结果
-    if ('transcription_url' in result) {
+    if ('transcription_url' in result && typeof result.transcription_url === 'string') {
       console.log(`[DashScope] 下载转写结果: ${result.transcription_url}`);
       
       try {
-        const transcriptionResponse = await axios.get(result.transcription_url);
+        const transcriptionResponse = await axios.get(result.transcription_url as string);
         const transcriptionData = transcriptionResponse.data;
         
         console.log(`[DashScope] 转写结果数据:`, JSON.stringify(transcriptionData, null, 2));
