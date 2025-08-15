@@ -36,8 +36,9 @@ export class KimiClient {
     this.apiKey = process.env.BAILIAN_API_KEY || '';
     this.baseURL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation';
     
-    if (!this.apiKey) {
-      throw new Error('BAILIAN_API_KEY environment variable is required');
+    // 只在运行时检查，不在构建时检查
+    if (!this.apiKey && typeof window === 'undefined' && process.env.NODE_ENV !== 'production') {
+      console.warn('BAILIAN_API_KEY environment variable is not set');
     }
   }
 
@@ -45,6 +46,11 @@ export class KimiClient {
    * 发送聊天消息到Kimi K2
    */
   async chat(messages: ChatMessage[], context?: string): Promise<ChatResponse> {
+    // 运行时检查API密钥
+    if (!this.apiKey) {
+      throw new Error('BAILIAN_API_KEY environment variable is required');
+    }
+
     try {
       // 构建系统提示
       let systemPrompt = `你是一个专业的AI助手，专门帮助用户分析和理解音频转写内容。你的任务是：
