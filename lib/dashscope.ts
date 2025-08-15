@@ -26,8 +26,9 @@ export class DashScopeClient {
       ...config
     };
 
-    if (!this.config.apiKey) {
-      throw new Error('DashScope API Key 未配置');
+    // 只在运行时检查，不在构建时检查
+    if (!this.config.apiKey && typeof window === 'undefined' && process.env.NODE_ENV !== 'production') {
+      console.warn('DashScope API Key 未配置');
     }
 
     this.client = axios.create({
@@ -78,6 +79,10 @@ export class DashScopeClient {
       languageHints?: string[];
     } = {}
   ): Promise<TranscriptionTaskResponse> {
+    // 运行时检查API密钥
+    if (!this.config.apiKey) {
+      throw new Error('DashScope API Key 未配置');
+    }
     const request: TranscriptionRequest = {
       model: this.config.model,
       input: {
