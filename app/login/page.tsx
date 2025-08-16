@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
 import { supabase } from '@/lib/supabase';
@@ -10,18 +10,20 @@ import { FileAudio, ArrowLeft } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const [view, setView] = useState<'sign_in' | 'sign_up'>('sign_in');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // 根据URL参数设置初始视图
   useEffect(() => {
-    const viewParam = searchParams.get('view');
-    if (viewParam === 'sign_up') {
-      setView('sign_up');
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const viewParam = urlParams.get('view');
+      if (viewParam === 'sign_up') {
+        setView('sign_up');
+      }
     }
-  }, [searchParams]);
+  }, []);
 
   // 如果已经登录，重定向到仪表板
   useEffect(() => {
@@ -37,9 +39,10 @@ export default function LoginPage() {
       (event, session) => {
         console.log('[登录页] 认证状态变化:', event, session);
         
-        if (event === 'SIGNED_UP') {
-          // 注册成功，显示验证弹窗
-          console.log('[登录页] 注册成功，显示验证弹窗');
+        // 检查是否为注册成功事件
+        if (event === 'SIGNED_IN' && session?.user && !session.user.email_confirmed_at) {
+          // 新注册用户需要验证邮箱
+          console.log('[登录页] 用户需要验证邮箱');
           setShowSuccessModal(true);
         }
       }
