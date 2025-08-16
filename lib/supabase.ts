@@ -25,7 +25,15 @@ export async function uploadFileToStorage(
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 8);
     const fileExtension = file.name.split('.').pop();
-    const fileName = `${file.name.replace(/\.[^/.]+$/, '')}_${timestamp}_${randomString}.${fileExtension}`;
+    
+    // 清理文件名中的特殊字符，只保留字母、数字、中文、连字符和下划线
+    const cleanBaseName = file.name
+      .replace(/\.[^/.]+$/, '') // 移除扩展名
+      .replace(/[^\w\u4e00-\u9fa5\-]/g, '_') // 替换特殊字符为下划线
+      .replace(/_+/g, '_') // 合并多个连续下划线
+      .replace(/^_|_$/g, ''); // 移除开头和结尾的下划线
+    
+    const fileName = `${cleanBaseName}_${timestamp}_${randomString}.${fileExtension}`;
     const filePath = `${folder}/${fileName}`;
 
     // 上传文件到 Supabase Storage
@@ -111,7 +119,7 @@ export async function ensureBucketExists(bucketName: string = 'audio-files') {
           'video/mp4',
           'video/quicktime'
         ],
-        fileSizeLimit: 30 * 1024 * 1024 // 30MB
+        fileSizeLimit: 50 * 1024 * 1024 // 50MB
       });
 
       if (createError) {

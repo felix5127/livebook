@@ -155,6 +155,59 @@ export class KimiClient {
     const response = await this.chat(messages, transcript);
     return response.choices[0].message.content;
   }
+
+  /**
+   * 生成结构化的笔记总结
+   */
+  async generateNoteSummary(transcript: string): Promise<{
+    mainTopics: string;
+    keyPoints: string[];
+    speakers: { speaker: string; viewpoint: string }[];
+    timeline: { time: string; content: string; importance: string }[];
+  }> {
+    const messages: ChatMessage[] = [{
+      role: 'user',
+      content: `快速分析以下音频转写内容，生成简洁的结构化总结。
+
+转写内容：
+${transcript}
+
+请直接返回JSON格式的总结，格式如下：
+{
+  "mainTopics": "一句话总结主要讨论的话题",
+  "keyPoints": ["关键点1", "关键点2", "关键点3"],
+  "speakers": [{"speaker": "说话人1", "viewpoint": "主要观点"}],
+  "timeline": [{"time": "时间点", "content": "该时间段讨论的内容", "importance": "重要"}]
+}
+
+要求：
+1. 直接返回JSON，不要任何额外文字
+2. mainTopics要简洁精准
+3. keyPoints提取3-5个最重要的点
+4. speakers根据实际说话人数量确定
+5. timeline选择3-5个重要时间点`
+    }];
+
+    const response = await this.chat(messages, transcript);
+    try {
+      let content = response.choices[0].message.content;
+      
+      // 清理markdown格式的JSON
+      content = content.replace(/```json\s*/g, '').replace(/```\s*$/g, '').trim();
+      
+      return JSON.parse(content);
+    } catch (error) {
+      // 如果JSON解析失败，返回默认结构
+      console.error('Failed to parse AI summary JSON:', error);
+      console.error('Raw content:', response.choices[0].message.content);
+      return {
+        mainTopics: "AI正在分析音频内容，请稍后重试",
+        keyPoints: ["内容分析中..."],
+        speakers: [{ speaker: "系统", viewpoint: "正在处理音频内容" }],
+        timeline: [{ time: "0:00", content: "分析进行中", importance: "系统" }]
+      };
+    }
+  }
 }
 
 // 导出默认实例

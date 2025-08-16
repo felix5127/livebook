@@ -32,7 +32,7 @@ export default function FileUploader({
       return '不支持的文件类型。支持的格式：MP3, WAV, M4A, MP4, MOV';
     }
     if (!validateFileSize(file)) {
-      return '文件大小超过限制（最大30MB）';
+      return '文件大小超过限制（最大50MB）';
     }
     return null;
   }, []);
@@ -295,7 +295,7 @@ export default function FileUploader({
                 拖拽文件到此处或点击上传
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                支持 MP3, WAV, M4A, MP4, MOV 格式，最大30MB
+                支持 MP3, WAV, M4A, MP4, MOV 格式，最大50MB
               </p>
             </div>
           )}

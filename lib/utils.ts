@@ -309,11 +309,31 @@ export function validateFileType(file: File): boolean {
 /**
  * 验证文件大小
  * @param file 文件对象
- * @param maxSizeMB 最大大小 (MB，默认30MB)
+ * @param maxSizeMB 最大大小 (MB，默认50MB)
  * @returns 是否在大小限制内
  */
-export function validateFileSize(file: File, maxSizeMB: number = 30): boolean {
+export function validateFileSize(file: File, maxSizeMB: number = 50): boolean {
   return isFileSizeValid(file.size, maxSizeMB);
+}
+
+/**
+ * 清理文件名中的特殊字符
+ * @param fileName 原始文件名
+ * @returns 清理后的文件名
+ */
+export function sanitizeFileName(fileName: string): string {
+  // 移除扩展名
+  const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
+  const extension = fileName.split('.').pop();
+  
+  // 清理文件名：只保留字母、数字、中文、连字符和下划线
+  const cleanName = nameWithoutExt
+    .replace(/[^\w\u4e00-\u9fa5\-]/g, '_') // 替换特殊字符为下划线
+    .replace(/_+/g, '_') // 合并多个连续下划线
+    .replace(/^_|_$/g, '') // 移除开头和结尾的下划线
+    .substring(0, 100); // 限制长度
+  
+  return extension ? `${cleanName}.${extension}` : cleanName;
 }
 
 /**
@@ -335,7 +355,7 @@ export function validateAudioFile(file: File): {
   if (!validateFileSize(file)) {
     return {
       isValid: false,
-      error: '文件大小超过限制（最大30MB）'
+      error: '文件大小超过限制（最大50MB）'
     };
   }
 

@@ -23,6 +23,20 @@ export default function NotebookPage() {
   const [error, setError] = useState<string | null>(null);
   const [audioReady, setAudioReady] = useState(false);
   
+  // 播放速度控制状态
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  
+  // AI总结状态
+  const [aiSummary, setAiSummary] = useState<{
+    mainTopics: string;
+    keyPoints: string[];
+    speakers: { speaker: string; viewpoint: string }[];
+    timeline: { time: string; content: string; importance: string }[];
+  } | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  
   // 替换功能状态
   const [showReplaceDialog, setShowReplaceDialog] = useState(false);
   const [replaceFrom, setReplaceFrom] = useState('');
@@ -32,6 +46,120 @@ export default function NotebookPage() {
   // 提示信息状态
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+
+  // 获取转写片段的统一函数
+  const getSegments = () => {
+    console.log('[调试] transcriptData 结构:', transcriptData);
+    console.log('[调试] transcriptData?.result?.segments:', transcriptData?.result?.segments);
+    console.log('[调试] transcriptData?.transcripts?.[0]?.sentences:', transcriptData?.transcripts?.[0]?.sentences);
+    
+    return transcriptData?.result?.segments || transcriptData?.transcripts?.[0]?.sentences || [];
+  };
+
+  // 直接基于提供的segments数据生成AI总结
+  const generateAiSummaryWithData = async (segments: any[]) => {
+    console.log('[AI总结] generateAiSummaryWithData 被调用，segments:', segments);
+    
+    if (isGeneratingSummary) {
+      console.log('[AI总结] 正在生成中，跳过');
+      return;
+    }
+    
+    if (!segments || segments.length === 0) {
+      console.log('[AI总结] 没有转写内容可供分析');
+      return;
+    }
+    
+    // 检查内容长度，如果太短就直接生成简单总结
+    const totalText = segments.map((seg: any) => seg.text).join('');
+    console.log('[AI总结] 检查内容长度:', { totalText, length: totalText.length });
+    
+    if (totalText.length < 50) {
+      console.log('[AI总结] 内容太短，生成简单总结');
+      setAiSummary({
+        mainTopics: `音频内容较短：${totalText}`,
+        keyPoints: [totalText],
+        speakers: [{ speaker: "说话人1", viewpoint: totalText }],
+        timeline: [{ time: "0:00", content: totalText, importance: "全部" }]
+      });
+      return;
+    }
+    
+    setIsGeneratingSummary(true);
+    
+    try {
+      // 准备转写内容，支持两种时间戳格式
+      const transcript = segments.map((seg: any) => {
+        const startTime = seg.start_time || seg.begin_time || 0;
+        const speakerId = seg.speaker_id !== undefined ? seg.speaker_id : 0;
+        return `[${formatTime(Math.floor(startTime / 1000))}] 说话人${parseInt(speakerId) + 1}: ${seg.text}`;
+      }).join('\n');
+      
+      console.log('[AI总结] 开始生成总结:', { transcriptLength: transcript.length });
+      
+      // 调用AI API生成总结
+      const response = await fetch('/api/ai/summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          transcript: transcript
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[AI总结] API响应错误:', errorText);
+        throw new Error(`生成总结失败: ${response.status}`);
+      }
+      
+      const summaryData = await response.json();
+      console.log('[AI总结] 生成成功:', summaryData);
+      
+      setAiSummary(summaryData);
+      
+      // 保存总结到本地缓存
+      try {
+        const cacheKey = `ai_summary_${notebookId}`;
+        localStorage.setItem(cacheKey, JSON.stringify(summaryData));
+        console.log('[AI总结] 保存到本地缓存成功');
+      } catch (cacheError) {
+        console.error('[AI总结] 保存到本地缓存失败:', cacheError);
+      }
+      
+    } catch (error) {
+      console.error('[AI总结] 生成失败:', error);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
+
+  // 生成AI总结（兼容旧接口）
+  const generateAiSummary = async () => {
+    console.log('[AI总结] generateAiSummary 被调用');
+    
+    const segments = getSegments();
+    console.log('[AI总结] 获取到的segments:', segments);
+    
+    if (!segments || segments.length === 0) {
+      console.log('[AI总结] 没有转写内容可供分析');
+      return;
+    }
+    
+    return generateAiSummaryWithData(segments);
+  };
+
+  // 加载用户播放速度偏好
+  useEffect(() => {
+    const savedPlaybackRate = localStorage.getItem('audioPlaybackRate');
+    if (savedPlaybackRate) {
+      const rate = parseFloat(savedPlaybackRate);
+      if (speedOptions.includes(rate)) {
+        setPlaybackRate(rate);
+      }
+    }
+  }, [speedOptions]);
 
   // 获取转写数据
   useEffect(() => {
@@ -62,6 +190,38 @@ export default function NotebookPage() {
             const lastSegment = data.data.result.segments[data.data.result.segments.length - 1];
             if (lastSegment.end_time) {
               setDuration(Math.ceil(lastSegment.end_time / 1000));
+            }
+          }
+          
+          // 先检查本地缓存是否有AI总结
+          const cacheKey = `ai_summary_${notebookId}`;
+          const cachedSummary = localStorage.getItem(cacheKey);
+          
+          if (cachedSummary) {
+            try {
+              const parsedSummary = JSON.parse(cachedSummary);
+              console.log('[AI总结] 使用本地缓存的总结');
+              setAiSummary(parsedSummary);
+            } catch (error) {
+              console.error('[AI总结] 解析缓存总结失败:', error);
+              localStorage.removeItem(cacheKey);
+              // 缓存损坏，生成新总结
+              const segments = data.data.result?.segments || data.data.transcripts?.[0]?.sentences;
+              if (segments && segments.length > 0) {
+                console.log('[AI总结] 缓存损坏，生成新总结');
+                setTimeout(() => {
+                  generateAiSummaryWithData(segments);
+                }, 100);
+              }
+            }
+          } else {
+            // 没有缓存的总结，生成新的
+            const segments = data.data.result?.segments || data.data.transcripts?.[0]?.sentences;
+            if (segments && segments.length > 0) {
+              console.log('[AI总结] 生成新总结，segments数量:', segments.length);
+              setTimeout(() => {
+                generateAiSummaryWithData(segments);
+              }, 100);
             }
           }
         } else {
@@ -100,12 +260,13 @@ export default function NotebookPage() {
   };
 
   const generateTitleFromContent = () => {
-    if (!transcriptData?.result?.segments || transcriptData.result.segments.length === 0) {
+    const segments = getSegments();
+    if (!segments || segments.length === 0) {
       return null;
     }
 
     // 提取前几句话的文本内容
-    const firstSegments = transcriptData.result.segments.slice(0, 3);
+    const firstSegments = segments.slice(0, 3);
     const combinedText = firstSegments.map((s: any) => s.text).join('');
     
     // 移除标点符号和空格
@@ -152,8 +313,8 @@ export default function NotebookPage() {
       const url = transcriptData.result.file_url;
       const filename = url.split('/').pop()?.split('?')[0];
       if (filename && filename !== 'undefined') {
-        // 移除生成的前缀，显示更友好的名称
-        return filename.replace(/^A-generated-\d+-\w+_\d+_\w+\./, '音频文件.');
+        // 直接使用文件名，不做任何修改以保持一致性
+        return filename;
       }
     }
     
@@ -239,6 +400,8 @@ export default function NotebookPage() {
       const handleCanPlay = () => {
         console.log('音频可以播放');
         setAudioReady(true);
+        // 应用保存的播放速度
+        audioRef.playbackRate = playbackRate;
       };
 
       audioRef.addEventListener('timeupdate', updateTime);
@@ -270,6 +433,21 @@ export default function NotebookPage() {
     }
   }, [chatMessages, isAiThinking]);
 
+  // 点击外部关闭播放速度菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (showSpeedMenu && !target.closest('.speed-menu-container')) {
+        setShowSpeedMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showSpeedMenu]);
+
   const handleSendQuestion = async () => {
     if (!question.trim() || isAiThinking) return;
     
@@ -287,9 +465,12 @@ export default function NotebookPage() {
     
     try {
       // 准备转写内容作为上下文
-      const context = transcriptData?.result?.segments?.map((seg: any) => 
-        `[${formatTime(Math.floor(seg.start_time / 1000))}] 说话人${parseInt(seg.speaker_id) + 1}: ${seg.text}`
-      ).join('\n') || '';
+      const segments = getSegments();
+      const context = segments.map((seg: any) => {
+        const startTime = seg.start_time || seg.begin_time || 0;
+        const speakerId = seg.speaker_id !== undefined ? seg.speaker_id : 0;
+        return `[${formatTime(Math.floor(startTime / 1000))}] 说话人${parseInt(speakerId) + 1}: ${seg.text}`;
+      }).join('\n') || '';
       
       console.log('[AI助手] 发送请求:', { userMessage, hasContext: !!context });
       
@@ -350,14 +531,16 @@ export default function NotebookPage() {
     }, 3000);
   };
 
+
   // 替换功能处理
   const handleReplace = () => {
-    if (!transcriptData?.result?.segments || !replaceFrom.trim()) {
+    const segments = getSegments();
+    if (!segments || !replaceFrom.trim()) {
       return;
     }
 
     let count = 0;
-    const updatedSegments = transcriptData.result.segments.map((segment: any) => {
+    const updatedSegments = segments.map((segment: any) => {
       if (segment.text.includes(replaceFrom)) {
         count++;
         return {
@@ -384,11 +567,14 @@ export default function NotebookPage() {
 
   // 复制功能
   const handleCopy = async () => {
-    if (transcriptData?.result?.segments) {
+    const segments = getSegments();
+    if (segments && segments.length > 0) {
       try {
-        const text = transcriptData.result.segments.map((s: any) => 
-          `${formatTime(Math.floor(s.start_time / 1000))} 说话人${parseInt(s.speaker_id) + 1}: ${s.text}`
-        ).join('\n');
+        const text = segments.map((s: any) => {
+          const startTime = s.start_time || s.begin_time || 0;
+          const speakerId = s.speaker_id !== undefined ? s.speaker_id : 0;
+          return `${formatTime(Math.floor(startTime / 1000))} 说话人${parseInt(speakerId) + 1}: ${s.text}`;
+        }).join('\n');
         await navigator.clipboard.writeText(text);
         showToastMessage('转写文本已复制到剪贴板！');
       } catch (error) {
@@ -648,6 +834,44 @@ export default function NotebookPage() {
             >
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
             </button>
+            
+            {/* 播放速度控制 */}
+            <div className="relative speed-menu-container">
+              <button
+                onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                disabled={!audioReady}
+              >
+                {playbackRate}x
+              </button>
+              
+              {/* 速度选择菜单 */}
+              {showSpeedMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-10 min-w-[60px]">
+                  {speedOptions.map((speed) => (
+                    <button
+                      key={speed}
+                      onClick={() => {
+                        setPlaybackRate(speed);
+                        setShowSpeedMenu(false);
+                        // 应用播放速度
+                        if (audioRef) {
+                          audioRef.playbackRate = speed;
+                        }
+                        // 保存用户偏好
+                        localStorage.setItem('audioPlaybackRate', speed.toString());
+                      }}
+                      className={`block w-full text-left px-3 py-2 text-xs hover:bg-gray-100 transition-colors ${
+                        speed === playbackRate ? 'bg-blue-50 text-blue-600' : 'text-gray-700'
+                      }`}
+                    >
+                      {speed}x
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
                 <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
@@ -948,67 +1172,96 @@ export default function NotebookPage() {
         {/* 总结标题 */}
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">笔记总结</h3>
-          <button className="px-3 py-1 text-sm bg-blue-100 text-blue-600 rounded-md hover:bg-blue-200">
-            重新生成
+          <button 
+            onClick={() => {
+              // 清除缓存后重新生成
+              const cacheKey = `ai_summary_${notebookId}`;
+              localStorage.removeItem(cacheKey);
+              console.log('[AI总结] 清除缓存，重新生成');
+              generateAiSummary();
+            }}
+            disabled={isGeneratingSummary}
+            className="px-3 py-1 text-sm bg-blue-100 text-blue-600 rounded-md hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingSummary ? '生成中...' : '重新生成'}
           </button>
         </div>
 
         {/* 内容总结 */}
         <div className="flex-1 overflow-y-auto">
-          {transcriptData?.result?.segments ? (
+          {getSegments().length > 0 ? (
             <div className="space-y-4">
-              {/* 主要议题 */}
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h4 className="font-medium text-blue-900 mb-2">🎯 主要议题</h4>
-                <p className="text-sm text-blue-800">
-                  本次讨论主要围绕深度学习和强化学习展开，探讨了机器学习的发展历程和技术细节。
-                </p>
-              </div>
-
-              {/* 关键要点 */}
-              <div className="bg-green-50 p-4 rounded-lg">
-                <h4 className="font-medium text-green-900 mb-2">💡 关键要点</h4>
-                <ul className="text-sm text-green-800 space-y-2">
-                  <li>• 强化学习是机器学习的一个特殊分支</li>
-                  <li>• 与传统机器学习的主要区别在于决策机制</li>
-                  <li>• 强化学习更适合解决复杂的序列决策问题</li>
-                  <li>• 人生本质上就是一个强化学习的过程</li>
-                </ul>
-              </div>
-
-              {/* 说话人观点 */}
-              <div className="bg-purple-50 p-4 rounded-lg">
-                <h4 className="font-medium text-purple-900 mb-2">👥 说话人观点</h4>
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <span className="font-medium text-purple-800">说话人1:</span>
-                    <p className="text-purple-700 mt-1">主要介绍了强化学习的基本概念和应用场景</p>
-                  </div>
-                  <div>
-                    <span className="font-medium text-purple-800">说话人2:</span>
-                    <p className="text-purple-700 mt-1">提出了关于技术普及和深入浅出解释的观点</p>
+              {isGeneratingSummary ? (
+                <div className="flex items-center justify-center h-40">
+                  <div className="text-center text-gray-500">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                    <p>AI正在分析音频内容...</p>
+                    <p className="text-sm mt-2">请稍候，这可能需要几十秒</p>
                   </div>
                 </div>
-              </div>
+              ) : aiSummary ? (
+                <>
+                  {/* 主要议题 */}
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-blue-900 mb-2">🎯 主要议题</h4>
+                    <p className="text-sm text-blue-800">
+                      {aiSummary.mainTopics}
+                    </p>
+                  </div>
 
-              {/* 时间线 */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">⏰ 内容时间线</h4>
-                <div className="space-y-2 text-sm text-gray-700">
-                  <div className="flex justify-between">
-                    <span>1:19 - 介绍背景和课程设置</span>
-                    <span className="text-xs text-gray-500">重要</span>
+                  {/* 关键要点 */}
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-green-900 mb-2">💡 关键要点</h4>
+                    <ul className="text-sm text-green-800 space-y-2">
+                      {aiSummary.keyPoints.map((point, index) => (
+                        <li key={index}>• {point}</li>
+                      ))}
+                    </ul>
                   </div>
-                  <div className="flex justify-between">
-                    <span>1:50 - 强化学习概念解释</span>
-                    <span className="text-xs text-gray-500">核心</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>2:02 - 传统机器学习对比</span>
-                    <span className="text-xs text-gray-500">对比</span>
+
+                  {/* 说话人观点 */}
+                  {aiSummary.speakers.length > 0 && (
+                    <div className="bg-purple-50 p-4 rounded-lg">
+                      <h4 className="font-medium text-purple-900 mb-2">👥 说话人观点</h4>
+                      <div className="space-y-3 text-sm">
+                        {aiSummary.speakers.map((speaker, index) => (
+                          <div key={index}>
+                            <span className="font-medium text-purple-800">{speaker.speaker}:</span>
+                            <p className="text-purple-700 mt-1">{speaker.viewpoint}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 时间线 */}
+                  {aiSummary.timeline.length > 0 && (
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-2">⏰ 内容时间线</h4>
+                      <div className="space-y-2 text-sm text-gray-700">
+                        {aiSummary.timeline.map((item, index) => (
+                          <div key={index} className="flex justify-between">
+                            <span>{item.time} - {item.content}</span>
+                            <span className="text-xs text-gray-500">{item.importance}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-40">
+                  <div className="text-center text-gray-500">
+                    <p>AI总结生成失败</p>
+                    <button 
+                      onClick={generateAiSummary}
+                      className="mt-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                      重新生成
+                    </button>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-40">

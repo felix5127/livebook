@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS public.transcription_tasks (
   -- 转写结果 (JSON)
   result JSONB,
   
+  -- AI总结结果 (JSON)
+  ai_summary JSONB,
+  ai_summary_generated_at TIMESTAMPTZ,
+  
   -- 用户信息 (如果需要用户系统)
   user_id UUID,
   

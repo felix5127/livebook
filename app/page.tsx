@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Settings, FileAudio, Clock, User, PlayCircle, Trash2 } from 'lucide-react';
+import { Plus, Settings, FileAudio, Clock, User, PlayCircle, Trash2, LogIn, LogOut } from 'lucide-react';
 import FileUploader from '@/components/FileUploader';
+import AuthModal from '@/components/AuthModal';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Notebook {
   id: string;
@@ -55,8 +57,10 @@ const generateSmartTitle = (fileName: string) => {
 
 export default function HomePage() {
   const router = useRouter();
+  const { user, loading: authLoading, signOut } = useAuth();
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [showUploader, setShowUploader] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [processingTasks, setProcessingTasks] = useState<ProcessingTask[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [activePolls, setActivePolls] = useState<Set<string>>(new Set());
@@ -86,6 +90,67 @@ export default function HomePage() {
         if (savedNotebooks) {
           const notebooks: Notebook[] = JSON.parse(savedNotebooks);
           setNotebooks(notebooks);
+          
+          // 异步更新可能需要智能标题的笔记本（如testcase等文件名）
+          notebooks.forEach(async (notebook) => {
+            // 检查标题是否看起来像文件名（没有中文且长度较短）
+            if (notebook.title && 
+                !/[\u4e00-\u9fa5]/.test(notebook.title) && 
+                notebook.title.length < 20 &&
+                !notebook.title.includes(' ')) {
+              try {
+                const transcriptResponse = await fetch(`/api/tasks/${notebook.id}`);
+                const transcriptData = await transcriptResponse.json();
+                
+                if (transcriptData.success && transcriptData.data) {
+                  const segments = transcriptData.data.result?.segments || 
+                                 transcriptData.data.transcripts?.[0]?.sentences ||
+                                 [];
+                  
+                  if (segments.length > 0) {
+                    // 提取前几句话的文本内容
+                    const firstSegments = segments.slice(0, 3);
+                    const combinedText = firstSegments.map((s: any) => s.text).join('');
+                    const cleanText = combinedText.replace(/[，。！？；：""''（）【】]/g, '').trim();
+                    
+                    let newTitle = notebook.title;
+                    
+                    // 根据内容关键词生成标题
+                    if (cleanText.includes('强化学习') || cleanText.includes('机器学习') || cleanText.includes('深度学习')) {
+                      newTitle = '机器学习技术讨论';
+                    } else if (cleanText.includes('清华大学') || cleanText.includes('大学') || cleanText.includes('课程')) {
+                      newTitle = '学术课程讲座';
+                    } else if (cleanText.includes('产品') || cleanText.includes('设计') || cleanText.includes('用户')) {
+                      newTitle = '产品设计会议';
+                    } else if (cleanText.includes('技术') || cleanText.includes('算法') || cleanText.includes('系统')) {
+                      newTitle = '技术研讨会';
+                    } else if (cleanText.includes('会议') || cleanText.includes('讨论') || cleanText.includes('分享')) {
+                      newTitle = '团队讨论会议';
+                    } else if (cleanText.length > 15) {
+                      newTitle = cleanText.substring(0, 15) + '...';
+                    } else if (cleanText) {
+                      newTitle = cleanText;
+                    }
+                    
+                    // 如果标题改变了，更新笔记本
+                    if (newTitle !== notebook.title) {
+                      setNotebooks(prev => {
+                        const updated = prev.map(nb => 
+                          nb.id === notebook.id ? {...nb, title: newTitle} : nb
+                        );
+                        // 保存更新后的数据到localStorage
+                        localStorage.setItem('notebooks', JSON.stringify(updated));
+                        return updated;
+                      });
+                      console.log(`[首页] 更新笔记标题: ${notebook.title} -> ${newTitle}`);
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error('[首页] 更新笔记标题失败:', error);
+              }
+            }
+          });
         } else {
           // 如果没有保存的数据，设置初始示例数据
           const mockNotebooks: Notebook[] = [
@@ -277,9 +342,12 @@ export default function HomePage() {
                     const transcriptResponse = await fetch(`/api/tasks/${taskId}`);
                     const transcriptData = await transcriptResponse.json();
                     
-                    if (transcriptData.success && transcriptData.data.transcriptContent) {
-                      const segments = transcriptData.data.transcriptContent.transcripts?.[0]?.sentences;
-                      if (segments && segments.length > 0) {
+                    if (transcriptData.success && transcriptData.data) {
+                      // 兼容两种数据格式
+                      const segments = transcriptData.data.result?.segments || 
+                                     transcriptData.data.transcripts?.[0]?.sentences ||
+                                     [];
+                      if (segments.length > 0) {
                         // 提取前几句话的文本内容
                         const firstSegments = segments.slice(0, 3);
                         const combinedText = firstSegments.map((s: any) => s.text).join('');
@@ -437,7 +505,38 @@ export default function HomePage() {
               </h1>
             </div>
             
-            <div className="flex items-center">
+            <div className="flex items-center space-x-3">
+              {/* 用户状态显示 */}
+              {authLoading ? (
+                <div className="animate-pulse">
+                  <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
+                </div>
+              ) : user ? (
+                <div className="flex items-center space-x-3">
+                  <div className="flex flex-col items-end">
+                    <span className="text-sm font-medium text-gray-900">
+                      {user.email}
+                    </span>
+                    <span className="text-xs text-green-600">已登录</span>
+                  </div>
+                  <button
+                    onClick={signOut}
+                    className="p-2 text-gray-500 hover:text-red-600 rounded-md hover:bg-gray-100"
+                    title="退出登录"
+                  >
+                    <LogOut className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>登录</span>
+                </button>
+              )}
+              
               <button 
                 onClick={clearAllData}
                 className="p-2 text-gray-500 hover:text-gray-700 rounded-md hover:bg-gray-100"
@@ -606,6 +705,12 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* 登录弹窗 */}
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+      />
     </div>
   );
 }

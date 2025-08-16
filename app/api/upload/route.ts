@@ -26,12 +26,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 验证文件大小 (30MB)
-    if (!validateFileSize(file, 30)) {
+    // 验证文件大小 (50MB)
+    if (!validateFileSize(file, 50)) {
       return NextResponse.json(
         { 
           success: false, 
-          error: '文件大小超过限制（最大30MB）' 
+          error: '文件大小超过限制（最大50MB）' 
         },
         { status: 400 }
       );
