@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
@@ -22,6 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     // 获取初始会话
@@ -42,19 +44,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('[Auth] 状态变化:', event, session?.user?.email);
+        
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // 处理登录成功后的重定向
+        if (event === 'SIGNED_IN' && session?.user) {
+          console.log('[Auth] 登录成功，重定向到仪表板');
+          // 延迟一点执行重定向，确保状态已更新
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 100);
+        }
+        
+        // 处理登出后的重定向
+        if (event === 'SIGNED_OUT') {
+          console.log('[Auth] 用户登出，重定向到主页');
+          setTimeout(() => {
+            router.push('/');
+          }, 100);
+        }
       }
     );
 
     return () => subscription?.unsubscribe();
-  }, []);
+  }, [router]);
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('退出登录失败:', error);
+    } else {
+      console.log('[Auth] 退出登录成功');
+      // supabase.auth.onAuthStateChange 会自动处理重定向
     }
   };
 

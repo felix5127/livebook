@@ -22,6 +22,8 @@ export default function NotebookPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [audioReady, setAudioReady] = useState(false);
+  const [audioStatus, setAudioStatus] = useState<'loading' | 'ready' | 'error' | 'testing'>('loading');
+  const [audioError, setAudioError] = useState<string | null>(null);
   
   // 播放速度控制状态
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -54,6 +56,33 @@ export default function NotebookPage() {
     console.log('[调试] transcriptData?.transcripts?.[0]?.sentences:', transcriptData?.transcripts?.[0]?.sentences);
     
     return transcriptData?.result?.segments || transcriptData?.transcripts?.[0]?.sentences || [];
+  };
+
+  // 测试音频URL连接
+  const testAudioConnection = async (url: string): Promise<boolean> => {
+    try {
+      setAudioStatus('testing');
+      console.log('[音频测试] 开始测试音频连接:', url);
+      
+      const response = await fetch(url, { 
+        method: 'HEAD',
+        mode: 'cors'
+      });
+      
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        const contentLength = response.headers.get('content-length');
+        console.log('[音频测试] 连接成功:', { contentType, contentLength });
+        setAudioError(null);
+        return true;
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    } catch (error: any) {
+      console.error('[音频测试] 连接失败:', error);
+      setAudioError(error.message);
+      return false;
+    }
   };
 
   // 直接基于提供的segments数据生成AI总结
@@ -247,8 +276,44 @@ export default function NotebookPage() {
       const audioUrl = getAudioUrl();
       if (audioUrl && audioRef.src !== audioUrl) {
         console.log('设置音频源:', audioUrl);
-        audioRef.src = audioUrl;
-        audioRef.load(); // 重新加载音频
+        setAudioReady(false);
+        setIsPlaying(false);
+        setAudioStatus('loading');
+        
+        // 先测试音频连接
+        const setupAudio = async () => {
+          const isConnected = await testAudioConnection(audioUrl);
+          
+          if (isConnected) {
+            audioRef.src = audioUrl;
+            
+            // 添加重试逻辑
+            const loadAudioWithRetry = async (retryCount = 0) => {
+              try {
+                audioRef.load();
+                console.log(`音频加载重试 ${retryCount + 1}/3`);
+              } catch (error) {
+                console.error(`音频加载失败 (重试 ${retryCount + 1}/3):`, error);
+                if (retryCount < 2) {
+                  setTimeout(() => loadAudioWithRetry(retryCount + 1), 1000);
+                } else {
+                  console.error('音频加载最终失败，已达到最大重试次数');
+                  setAudioReady(false);
+                  setAudioStatus('error');
+                  setAudioError('音频加载失败，已达到最大重试次数');
+                }
+              }
+            };
+            
+            loadAudioWithRetry();
+          } else {
+            setAudioStatus('error');
+            setAudioReady(false);
+            console.error('音频连接测试失败，跳过加载');
+          }
+        };
+        
+        setupAudio();
       }
     }
   }, [audioRef, transcriptData]);
@@ -325,46 +390,110 @@ export default function NotebookPage() {
   const getAudioUrl = () => {
     console.log('调试 - transcriptData:', transcriptData);
     
+    let originalUrl = null;
+    
     // 根据API路由的结构，音频URL应该在transcription对象中
     if (transcriptData?.transcription?.file_url) {
       console.log('找到音频URL (transcription):', transcriptData.transcription.file_url);
-      return transcriptData.transcription.file_url;
+      originalUrl = transcriptData.transcription.file_url;
     }
-    
     // 备用：检查result层级的file_url
-    if (transcriptData?.result?.file_url) {
+    else if (transcriptData?.result?.file_url) {
       console.log('找到音频URL (result):', transcriptData.result.file_url);
-      return transcriptData.result.file_url;
+      originalUrl = transcriptData.result.file_url;
     }
-    
     // 备用：检查根级别的file_url
-    if (transcriptData?.file_url) {
+    else if (transcriptData?.file_url) {
       console.log('找到音频URL (root):', transcriptData.file_url);
-      return transcriptData.file_url;
+      originalUrl = transcriptData.file_url;
     }
     
-    console.log('未找到音频URL - 可用的keys:', Object.keys(transcriptData || {}));
-    return null;
+    if (!originalUrl) {
+      console.log('未找到音频URL - 可用的keys:', Object.keys(transcriptData || {}));
+      return null;
+    }
+
+    // 检查是否是外部URL，如果是则使用代理
+    try {
+      const url = new URL(originalUrl);
+      const isExternal = url.hostname !== window.location.hostname;
+      
+      if (isExternal) {
+        // 使用音频代理服务
+        const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(originalUrl)}`;
+        console.log('使用音频代理:', proxyUrl);
+        return proxyUrl;
+      } else {
+        // 本地文件直接返回
+        console.log('使用本地音频URL:', originalUrl);
+        return originalUrl;
+      }
+    } catch (error) {
+      console.error('解析音频URL失败:', error);
+      // 如果URL解析失败，仍然尝试使用代理
+      const proxyUrl = `/api/audio-proxy?url=${encodeURIComponent(originalUrl)}`;
+      console.log('URL解析失败，使用代理:', proxyUrl);
+      return proxyUrl;
+    }
   };
 
   const handlePlayPause = async () => {
-    if (audioRef) {
-      try {
-        if (isPlaying) {
-          audioRef.pause();
-          setIsPlaying(false);
-        } else {
-          console.log('尝试播放音频:', audioRef.src);
-          await audioRef.play();
-          setIsPlaying(true);
-        }
-      } catch (error) {
-        console.error('音频播放失败:', error);
-        setIsPlaying(false);
-        // 可以在这里添加用户提示
-      }
-    } else {
+    if (!audioRef) {
       console.warn('音频元素未初始化，音频URL:', getAudioUrl());
+      showToastMessage('音频播放器未准备好，请稍候重试');
+      return;
+    }
+
+    if (!audioReady) {
+      console.warn('音频未准备好，当前URL:', audioRef.src);
+      showToastMessage('音频正在加载中，请稍候...');
+      return;
+    }
+
+    try {
+      if (isPlaying) {
+        audioRef.pause();
+        setIsPlaying(false);
+        console.log('音频暂停');
+      } else {
+        console.log('尝试播放音频:', audioRef.src);
+        
+        // 检查音频源是否有效
+        if (!audioRef.src || audioRef.src === window.location.href) {
+          const audioUrl = getAudioUrl();
+          if (audioUrl) {
+            console.log('重新设置音频源:', audioUrl);
+            audioRef.src = audioUrl;
+            audioRef.load();
+            // 等待加载完成后再播放
+            setTimeout(() => handlePlayPause(), 1000);
+            return;
+          } else {
+            throw new Error('无法获取音频URL');
+          }
+        }
+        
+        const playPromise = audioRef.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+          setIsPlaying(true);
+          console.log('音频播放成功');
+        }
+      }
+    } catch (error: any) {
+      console.error('音频播放失败:', error);
+      setIsPlaying(false);
+      
+      // 根据错误类型提供不同的用户提示
+      if (error.name === 'NotAllowedError') {
+        showToastMessage('浏览器阻止了自动播放，请手动点击播放按钮');
+      } else if (error.name === 'NotSupportedError') {
+        showToastMessage('当前浏览器不支持此音频格式');
+      } else if (error.name === 'AbortError') {
+        showToastMessage('音频播放被中断');
+      } else {
+        showToastMessage(`音频播放失败: ${error.message || '未知错误'}`);
+      }
     }
   };
 
@@ -793,14 +922,63 @@ export default function NotebookPage() {
       {/* 音频元素 */}
       <audio
         ref={setAudioRef}
-        preload="metadata"
+        preload="auto"
         crossOrigin="anonymous"
-        onLoadStart={() => console.log('音频开始加载')}
-        onLoadedData={() => console.log('音频数据已加载')}
-        onCanPlay={() => console.log('音频可以播放')}
+        onLoadStart={() => {
+          console.log('音频开始加载');
+          setAudioReady(false);
+          setAudioStatus('loading');
+        }}
+        onLoadedData={() => {
+          console.log('音频数据已加载');
+        }}
+        onLoadedMetadata={() => {
+          console.log('音频元数据已加载');
+        }}
+        onCanPlay={() => {
+          console.log('音频可以播放');
+          setAudioReady(true);
+          setAudioStatus('ready');
+          setAudioError(null);
+        }}
+        onCanPlayThrough={() => {
+          console.log('音频可以完整播放');
+          setAudioReady(true);
+          setAudioStatus('ready');
+          setAudioError(null);
+        }}
         onError={(e) => {
           console.error('音频错误:', e);
           console.error('音频错误详情:', e.currentTarget.error);
+          const audioElement = e.currentTarget;
+          if (audioElement.error) {
+            switch (audioElement.error.code) {
+              case MediaError.MEDIA_ERR_ABORTED:
+                console.error('音频播放被中止');
+                break;
+              case MediaError.MEDIA_ERR_NETWORK:
+                console.error('网络错误导致音频加载失败');
+                break;
+              case MediaError.MEDIA_ERR_DECODE:
+                console.error('音频解码错误');
+                break;
+              case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                console.error('音频格式不支持');
+                break;
+              default:
+                console.error('未知音频错误');
+            }
+          }
+          setAudioReady(false);
+          setIsPlaying(false);
+        }}
+        onProgress={(e) => {
+          const audio = e.currentTarget;
+          if (audio.buffered.length > 0) {
+            const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+            const duration = audio.duration;
+            console.log(`音频缓冲进度: ${Math.round((bufferedEnd / duration) * 100)}%`);
+          }
         }}
         style={{ display: 'none' }}
       />
@@ -823,17 +1001,46 @@ export default function NotebookPage() {
         {/* 音频播放器 */}
         <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-4">
           <div className="flex items-center space-x-4">
-            <button
-              onClick={handlePlayPause}
-              disabled={!audioReady}
-              className={`w-10 h-10 rounded-full flex items-center justify-center text-white transition-colors ${
-                audioReady 
-                  ? 'bg-blue-600 hover:bg-blue-700' 
-                  : 'bg-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-            </button>
+            <div className="relative">
+              <button
+                onClick={handlePlayPause}
+                disabled={audioStatus === 'loading' || audioStatus === 'testing'}
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-white transition-colors ${
+                  audioStatus === 'ready' 
+                    ? 'bg-blue-600 hover:bg-blue-700' 
+                    : audioStatus === 'error'
+                    ? 'bg-red-500 hover:bg-red-600'
+                    : 'bg-gray-400 cursor-not-allowed'
+                }`}
+                title={
+                  audioStatus === 'loading' ? '音频加载中...' :
+                  audioStatus === 'testing' ? '测试音频连接...' :
+                  audioStatus === 'error' ? `音频错误: ${audioError || '未知错误'}` :
+                  audioStatus === 'ready' ? '点击播放/暂停' :
+                  '音频未准备好'
+                }
+              >
+                {audioStatus === 'loading' || audioStatus === 'testing' ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : audioStatus === 'error' ? (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                ) : isPlaying ? (
+                  <Pause className="w-5 h-5" />
+                ) : (
+                  <Play className="w-5 h-5 ml-0.5" />
+                )}
+              </button>
+              
+              {/* 状态指示器 */}
+              {audioStatus !== 'ready' && (
+                <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
+                  audioStatus === 'loading' || audioStatus === 'testing' ? 'bg-yellow-500' :
+                  audioStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                }`}></div>
+              )}
+            </div>
             
             {/* 播放速度控制 */}
             <div className="relative speed-menu-container">
@@ -875,7 +1082,22 @@ export default function NotebookPage() {
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
                 <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
-                {!audioReady && <span>加载中...</span>}
+                <div className="flex items-center space-x-2">
+                  {audioStatus === 'loading' && (
+                    <span className="text-yellow-600">加载中...</span>
+                  )}
+                  {audioStatus === 'testing' && (
+                    <span className="text-blue-600">测试连接...</span>
+                  )}
+                  {audioStatus === 'error' && audioError && (
+                    <span className="text-red-600 truncate max-w-24" title={audioError}>
+                      {audioError.length > 12 ? audioError.substring(0, 12) + '...' : audioError}
+                    </span>
+                  )}
+                  {audioStatus === 'ready' && (
+                    <span className="text-green-600">就绪</span>
+                  )}
+                </div>
               </div>
               <div 
                 className="w-full bg-gray-200 rounded-full h-1.5 cursor-pointer"
