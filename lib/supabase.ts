@@ -22,6 +22,14 @@ export async function uploadFileToStorage(
   folder: string = 'uploads'
 ): Promise<{ success: boolean; url?: string; error?: string; path?: string }> {
   try {
+    // 检查环境变量
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.log('Supabase未配置，跳过文件上传');
+      return { success: false, error: 'Supabase未配置' };
+    }
     // 生成唯一文件名
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 8);
@@ -78,6 +86,14 @@ export async function deleteFileFromStorage(
   bucket: string = 'audio-files'
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // 检查环境变量
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.log('Supabase未配置，跳过文件删除');
+      return { success: false, error: 'Supabase未配置' };
+    }
     const { error } = await supabaseAdmin.storage
       .from(bucket)
       .remove([filePath]);
@@ -97,6 +113,15 @@ export async function deleteFileFromStorage(
 // 检查存储桶是否存在，如果不存在则创建
 export async function ensureBucketExists(bucketName: string = 'audio-files') {
   try {
+    // 检查环境变量
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.log('Supabase未配置，跳过存储桶操作');
+      return { success: false, error: 'Supabase未配置' };
+    }
+    
     // 尝试获取存储桶信息
     const { data: buckets, error: listError } = await supabaseAdmin.storage.listBuckets();
     
