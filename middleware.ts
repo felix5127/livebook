@@ -17,6 +17,14 @@ const DEV_BYPASS_PATHS = [
   '/api/status',
 ];
 
+// 不需要认证的公开路径
+const PUBLIC_PATHS = [
+  '/api/auth/',
+  '/api/test-auth-signup',
+  '/api/health',
+  '/api/error-report'
+];
+
 /**
  * API认证中间件
  * 支持JWT Token和API Key两种认证方式
@@ -26,6 +34,12 @@ export async function middleware(request: NextRequest) {
 
   // 只处理API路由
   if (!pathname.startsWith('/api/')) {
+    return NextResponse.next();
+  }
+
+  // 检查是否为公开路径
+  const isPublicPath = PUBLIC_PATHS.some(path => pathname.startsWith(path));
+  if (isPublicPath) {
     return NextResponse.next();
   }
 

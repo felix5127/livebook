@@ -1,22 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 import { sanitizeFileName } from './utils';
-import { getEnv, validateServiceConfig } from './env-init';
 
-// 获取验证后的环境变量
-let supabaseUrl: string;
-let supabaseAnonKey: string;
-let supabaseServiceRoleKey: string;
+// 直接从环境变量获取配置（客户端安全）
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 
-try {
-  const env = getEnv();
-  supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-  supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
-} catch (error) {
-  // 如果环境变量验证失败，使用占位符值
-  console.warn('Environment validation failed, using placeholder values for Supabase');
-  supabaseUrl = 'https://placeholder.supabase.co';
-  supabaseAnonKey = 'placeholder-key';
+// 服务端环境变量（仅在服务端可用）
+let supabaseServiceRoleKey: string = '';
+let validateServiceConfigFn: ((service: string) => boolean) | null = null;
+
+if (typeof window === 'undefined') {
+  // 只在服务端导入复杂的环境验证
+  try {
+    const { getEnv, validateServiceConfig } = require('./env-init');
+    const env = getEnv();
+    supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+    // 缓存函数引用
+    validateServiceConfigFn = validateServiceConfig;
+    // 导出validateServiceConfig供其他模块使用
+    (global as any).validateServiceConfig = validateServiceConfig;
+  } catch (error) {
+    console.warn('Server environment validation failed');
+    supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    // 提供简单的fallback
+    validateServiceConfigFn = () => true;
+    (global as any).validateServiceConfig = () => true;
+  }
+} else {
+  // 客户端不应该有服务端密钥
   supabaseServiceRoleKey = '';
 }
 
@@ -34,7 +45,8 @@ export async function uploadFileToStorage(
 ): Promise<{ success: boolean; url?: string; error?: string; path?: string }> {
   try {
     // 检查Supabase服务配置
-    if (!validateServiceConfig('supabase')) {
+    const validateFn = validateServiceConfigFn || (global as any).validateServiceConfig;
+    if (!validateFn || !validateFn('supabase')) {
       console.log('Supabase未配置，跳过文件上传');
       return { success: false, error: 'Supabase未配置' };
     }
@@ -90,7 +102,8 @@ export async function deleteFileFromStorage(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // 检查Supabase服务配置
-    if (!validateServiceConfig('supabase')) {
+    const validateFn = validateServiceConfigFn || (global as any).validateServiceConfig;
+    if (!validateFn || !validateFn('supabase')) {
       console.log('Supabase未配置，跳过文件删除');
       return { success: false, error: 'Supabase未配置' };
     }
@@ -114,7 +127,8 @@ export async function deleteFileFromStorage(
 export async function ensureBucketExists(bucketName: string = 'audio-files') {
   try {
     // 检查Supabase服务配置
-    if (!validateServiceConfig('supabase')) {
+    const validateFn = validateServiceConfigFn || (global as any).validateServiceConfig;
+    if (!validateFn || !validateFn('supabase')) {
       console.log('Supabase未配置，跳过存储桶操作');
       return { success: false, error: 'Supabase未配置' };
     }
