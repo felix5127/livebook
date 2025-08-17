@@ -1,12 +1,5 @@
 {
   "version": 2,
-  "name": "livebook-mvp",
-  "builds": [
-    {
-      "src": "next.config.js",
-      "use": "@vercel/next"
-    }
-  ],
   "env": {
     "NODE_ENV": "production",
     "NEXT_TELEMETRY_DISABLED": "1"
@@ -119,7 +112,6 @@
       "permanent": true
     }
   ],
-  "regions": ["hkg1", "sin1", "sfo1"],
   "framework": "nextjs",
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
