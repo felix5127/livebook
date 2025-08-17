@@ -1,12 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
+import { sanitizeFileName } from './utils';
+import { getEnv, validateServiceConfig } from './env-init';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// 获取验证后的环境变量
+let supabaseUrl: string;
+let supabaseAnonKey: string;
+let supabaseServiceRoleKey: string;
 
-// 只在运行时检查环境变量，构建时跳过检查
-if (typeof window !== 'undefined' && (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)) {
-  console.warn('Missing Supabase environment variables');
+try {
+  const env = getEnv();
+  supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+  supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+  supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+} catch (error) {
+  // 如果环境变量验证失败，使用占位符值
+  console.warn('Environment validation failed, using placeholder values for Supabase');
+  supabaseUrl = 'https://placeholder.supabase.co';
+  supabaseAnonKey = 'placeholder-key';
+  supabaseServiceRoleKey = '';
 }
 
 // 客户端 Supabase 实例 (用于前端)
@@ -22,27 +33,19 @@ export async function uploadFileToStorage(
   folder: string = 'uploads'
 ): Promise<{ success: boolean; url?: string; error?: string; path?: string }> {
   try {
-    // 检查环境变量
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
+    // 检查Supabase服务配置
+    if (!validateServiceConfig('supabase')) {
       console.log('Supabase未配置，跳过文件上传');
       return { success: false, error: 'Supabase未配置' };
     }
-    // 生成唯一文件名
+    // 生成唯一安全文件名
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 8);
-    const fileExtension = file.name.split('.').pop();
+    const safeFileName = sanitizeFileName(file.name);
+    const fileExtension = safeFileName.split('.').pop();
+    const baseName = safeFileName.replace(/\.[^/.]+$/, '');
     
-    // 清理文件名中的特殊字符，只保留字母、数字、中文、连字符和下划线
-    const cleanBaseName = file.name
-      .replace(/\.[^/.]+$/, '') // 移除扩展名
-      .replace(/[^\w\u4e00-\u9fa5\-]/g, '_') // 替换特殊字符为下划线
-      .replace(/_+/g, '_') // 合并多个连续下划线
-      .replace(/^_|_$/g, ''); // 移除开头和结尾的下划线
-    
-    const fileName = `${cleanBaseName}_${timestamp}_${randomString}.${fileExtension}`;
+    const fileName = `${baseName}_${timestamp}_${randomString}.${fileExtension}`;
     const filePath = `${folder}/${fileName}`;
 
     // 上传文件到 Supabase Storage
@@ -86,11 +89,8 @@ export async function deleteFileFromStorage(
   bucket: string = 'audio-files'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // 检查环境变量
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
+    // 检查Supabase服务配置
+    if (!validateServiceConfig('supabase')) {
       console.log('Supabase未配置，跳过文件删除');
       return { success: false, error: 'Supabase未配置' };
     }
@@ -113,11 +113,8 @@ export async function deleteFileFromStorage(
 // 检查存储桶是否存在，如果不存在则创建
 export async function ensureBucketExists(bucketName: string = 'audio-files') {
   try {
-    // 检查环境变量
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
+    // 检查Supabase服务配置
+    if (!validateServiceConfig('supabase')) {
       console.log('Supabase未配置，跳过存储桶操作');
       return { success: false, error: 'Supabase未配置' };
     }

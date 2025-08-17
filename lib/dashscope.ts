@@ -8,6 +8,7 @@ import {
   DashScopeError,
   DashScopeConfig
 } from '@/types/transcription';
+import { getEnv, validateServiceConfig } from './env-init';
 
 /**
  * 阿里云 DashScope Paraformer API 封装类
@@ -17,17 +18,30 @@ export class DashScopeClient {
   private config: DashScopeConfig;
 
   constructor(config?: Partial<DashScopeConfig>) {
+    // 尝试获取验证后的环境变量
+    let apiKey = '';
+    let apiUrl = 'https://dashscope.aliyuncs.com/api/v1/services/audio/asr';
+    
+    try {
+      const env = getEnv();
+      apiKey = env.DASHSCOPE_API_KEY || env.BAILIAN_API_KEY || '';
+      apiUrl = env.DASHSCOPE_API_URL || 'https://dashscope.aliyuncs.com/api/v1/services/audio/asr';
+    } catch (error) {
+      // 如果环境变量验证失败，使用默认值或传入的配置
+      console.warn('Environment validation failed, using fallback values for DashScope');
+    }
+    
     this.config = {
-      apiKey: process.env.DASHSCOPE_API_KEY || '',
-      apiUrl: process.env.DASHSCOPE_API_URL || 'https://dashscope.aliyuncs.com/api/v1/services/audio/asr',
+      apiKey,
+      apiUrl,
       model: 'paraformer-v2',
       maxRetries: 3,
       retryDelay: 1000,
       ...config
     };
 
-    // 只在运行时检查，不在构建时检查
-    if (!this.config.apiKey && typeof window === 'undefined' && process.env.NODE_ENV !== 'production') {
+    // 检查DashScope服务配置
+    if (!validateServiceConfig('dashscope') && typeof window === 'undefined') {
       console.warn('DashScope API Key 未配置');
     }
 

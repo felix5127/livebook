@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useState, useRef } from 'react';
-import { Upload, X, File, Link, AlertCircle } from 'lucide-react';
-import { cn, formatFileSize, validateFileType, validateFileSize, isYouTubeUrl, isBilibiliUrl } from '@/lib/utils';
+import { Upload, X, File, Link, AlertCircle, Shield, CheckCircle } from 'lucide-react';
+import { cn, formatFileSize, validateFileType, validateFileSize, validateFileSecurity, isYouTubeUrl, isBilibiliUrl } from '@/lib/utils';
 
 interface FileUploaderProps {
   onFileUpload: (file: File, taskId?: string) => void;
@@ -22,19 +22,34 @@ export default function FileUploader({
   const [urlInput, setUrlInput] = useState('');
   const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file');
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isValidating, setIsValidating] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validateFile = useCallback((file: File): string | null => {
-    if (!validateFileType(file)) {
-      return '不支持的文件类型。支持的格式：MP3, WAV, M4A, MP4, MOV';
+  const validateFile = useCallback(async (file: File): Promise<{
+    isValid: boolean;
+    error?: string;
+    warnings?: string[];
+  }> => {
+    try {
+      setIsValidating(true);
+      const result = await validateFileSecurity(file, 50);
+      return {
+        isValid: result.isValid,
+        error: result.error,
+        warnings: result.warnings
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        error: '文件验证失败，请重试'
+      };
+    } finally {
+      setIsValidating(false);
     }
-    if (!validateFileSize(file)) {
-      return '文件大小超过限制（最大50MB）';
-    }
-    return null;
   }, []);
 
   const validateUrl = useCallback((url: string): string | null => {
@@ -80,7 +95,7 @@ export default function FileUploader({
     e.stopPropagation();
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
@@ -90,27 +105,39 @@ export default function FileUploader({
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
       const file = files[0];
-      const validationError = validateFile(file);
-      if (validationError) {
-        setError(validationError);
+      setError(null);
+      setWarnings([]);
+      
+      const validation = await validateFile(file);
+      if (!validation.isValid) {
+        setError(validation.error || '文件验证失败');
         return;
       }
+      
       setSelectedFile(file);
-      setError(null);
+      if (validation.warnings) {
+        setWarnings(validation.warnings);
+      }
     }
   }, [disabled, validateFile]);
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      const validationError = validateFile(file);
-      if (validationError) {
-        setError(validationError);
+      setError(null);
+      setWarnings([]);
+      
+      const validation = await validateFile(file);
+      if (!validation.isValid) {
+        setError(validation.error || '文件验证失败');
         return;
       }
+      
       setSelectedFile(file);
-      setError(null);
+      if (validation.warnings) {
+        setWarnings(validation.warnings);
+      }
     }
   }, [validateFile]);
 
@@ -235,6 +262,7 @@ export default function FileUploader({
   const clearSelectedFile = useCallback(() => {
     setSelectedFile(null);
     setError(null);
+    setWarnings([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -294,9 +322,13 @@ export default function FileUploader({
               <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                 拖拽文件到此处或点击上传
               </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
                 支持 MP3, WAV, M4A, MP4, MOV 格式，最大50MB
               </p>
+              <div className="flex items-center justify-center space-x-2 text-xs text-gray-400">
+                <Shield className="w-4 h-4" />
+                <span>文件安全验证已启用</span>
+              </div>
             </div>
           )}
           
@@ -305,12 +337,15 @@ export default function FileUploader({
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center space-x-3">
                   <File className="w-8 h-8 text-primary-500" />
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
-                      {selectedFile.name}
-                    </p>
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {selectedFile.name}
+                      </p>
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                    </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {formatFileSize(selectedFile.size)}
+                      {formatFileSize(selectedFile.size)} • 安全验证通过
                     </p>
                   </div>
                 </div>
@@ -322,6 +357,33 @@ export default function FileUploader({
                   <X className="w-5 h-5" />
                 </button>
               </div>
+              
+              {/* 警告信息 */}
+              {warnings.length > 0 && (
+                <div className="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                  <div className="flex items-start space-x-2">
+                    <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">注意事项：</p>
+                      <ul className="text-sm text-yellow-700 dark:text-yellow-300 mt-1 space-y-1">
+                        {warnings.map((warning, index) => (
+                          <li key={index}>• {warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* 验证状态 */}
+              {isValidating && (
+                <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                  <div className="flex items-center space-x-2">
+                    <Shield className="w-4 h-4 text-blue-600 animate-pulse" />
+                    <p className="text-sm text-blue-700 dark:text-blue-300">正在进行安全验证...</p>
+                  </div>
+                </div>
+              )}
               
               {isUploading && (
                 <div className="mb-3">

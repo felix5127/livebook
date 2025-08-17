@@ -298,7 +298,274 @@ export function throttle<T extends (...args: any[]) => any>(
 // 新增的缺失函数
 
 /**
- * 验证文件类型
+ * 文件魔数签名定义
+ */
+const FILE_SIGNATURES = {
+  // 音频格式
+  mp3: {
+    signatures: [
+      [0xFF, 0xFB], // MP3 frame header
+      [0xFF, 0xF3], // MP3 frame header
+      [0xFF, 0xF2], // MP3 frame header
+      [0x49, 0x44, 0x33] // ID3v2 header "ID3"
+    ],
+    mimeTypes: ['audio/mpeg', 'audio/mp3']
+  },
+  wav: {
+    signatures: [
+      [0x52, 0x49, 0x46, 0x46] // "RIFF"
+    ],
+    mimeTypes: ['audio/wav', 'audio/wave']
+  },
+  m4a: {
+    signatures: [
+      [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70], // ftyp box
+      [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70] // ftyp box
+    ],
+    mimeTypes: ['audio/mp4', 'audio/m4a']
+  },
+  mp4: {
+    signatures: [
+      [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70], // ftyp box
+      [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70] // ftyp box
+    ],
+    mimeTypes: ['video/mp4']
+  },
+  mov: {
+    signatures: [
+      [0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70] // ftyp box
+    ],
+    mimeTypes: ['video/quicktime']
+  },
+  aac: {
+    signatures: [
+      [0xFF, 0xF1], // ADTS header
+      [0xFF, 0xF9]  // ADTS header
+    ],
+    mimeTypes: ['audio/aac']
+  },
+  flac: {
+    signatures: [
+      [0x66, 0x4C, 0x61, 0x43] // "fLaC"
+    ],
+    mimeTypes: ['audio/flac']
+  },
+  ogg: {
+    signatures: [
+      [0x4F, 0x67, 0x67, 0x53] // "OggS"
+    ],
+    mimeTypes: ['audio/ogg']
+  }
+};
+
+/**
+ * 读取文件的前几个字节
+ * @param file 文件对象
+ * @param bytesToRead 要读取的字节数
+ * @returns Promise<Uint8Array>
+ */
+async function readFileHeader(file: File, bytesToRead: number = 16): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    const slice = file.slice(0, bytesToRead);
+    
+    reader.onload = () => {
+      const arrayBuffer = reader.result as ArrayBuffer;
+      resolve(new Uint8Array(arrayBuffer));
+    };
+    
+    reader.onerror = () => {
+      reject(new Error('无法读取文件头'));
+    };
+    
+    reader.readAsArrayBuffer(slice);
+  });
+}
+
+/**
+ * 检查字节数组是否匹配签名
+ * @param header 文件头字节
+ * @param signature 签名字节数组
+ * @returns 是否匹配
+ */
+function matchesSignature(header: Uint8Array, signature: number[]): boolean {
+  if (header.length < signature.length) return false;
+  
+  return signature.every((byte, index) => header[index] === byte);
+}
+
+/**
+ * 验证文件魔数和MIME类型
+ * @param file 文件对象
+ * @returns Promise<验证结果>
+ */
+export async function validateFileSignature(file: File): Promise<{
+  isValid: boolean;
+  detectedType?: string;
+  error?: string;
+}> {
+  try {
+    const header = await readFileHeader(file, 32);
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    // 检查文件是否为空
+    if (file.size === 0) {
+      return {
+        isValid: false,
+        error: '文件为空'
+      };
+    }
+    
+    // 检查扩展名是否支持
+    if (!extension || !FILE_SIGNATURES[extension as keyof typeof FILE_SIGNATURES]) {
+      return {
+        isValid: false,
+        error: `不支持的文件扩展名: ${extension}`
+      };
+    }
+    
+    const expectedFormat = FILE_SIGNATURES[extension as keyof typeof FILE_SIGNATURES];
+    let signatureMatched = false;
+    
+    // 检查魔数是否匹配
+    for (const signature of expectedFormat.signatures) {
+      if (matchesSignature(header, signature)) {
+        signatureMatched = true;
+        break;
+      }
+    }
+    
+    if (!signatureMatched) {
+      return {
+        isValid: false,
+        error: `文件内容与扩展名不匹配。文件可能被重命名或损坏`
+      };
+    }
+    
+    // 检查MIME类型
+    if (!expectedFormat.mimeTypes.includes(file.type)) {
+      return {
+        isValid: false,
+        error: `MIME类型不匹配。期望: ${expectedFormat.mimeTypes.join(', ')}, 实际: ${file.type}`
+      };
+    }
+    
+    return {
+      isValid: true,
+      detectedType: extension
+    };
+    
+  } catch (error) {
+    return {
+      isValid: false,
+      error: `文件验证失败: ${error instanceof Error ? error.message : '未知错误'}`
+    };
+  }
+}
+
+/**
+ * 检查文件名是否包含可疑内容
+ * @param fileName 文件名
+ * @returns 验证结果
+ */
+export function validateFileName(fileName: string): {
+  isValid: boolean;
+  error?: string;
+} {
+  // 检查文件名长度
+  if (fileName.length > 255) {
+    return {
+      isValid: false,
+      error: '文件名过长（最大255字符）'
+    };
+  }
+  
+  // 检查危险字符
+  const dangerousPatterns = [
+    /\.\./,           // 路径遍历
+    /[<>:"|?*]/,      // Windows保留字符
+    /[\x00-\x1f]/,    // 控制字符
+    /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i, // Windows保留名
+    /\.(exe|bat|cmd|scr|pif|com|vbs|js|jar|app|dmg)$/i // 可执行文件
+  ];
+  
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(fileName)) {
+      return {
+        isValid: false,
+        error: '文件名包含不安全字符或为系统保留名'
+      };
+    }
+  }
+  
+  return { isValid: true };
+}
+
+/**
+ * 检查文件内容是否包含可疑的恶意模式
+ * @param file 文件对象
+ * @returns Promise<检查结果>
+ */
+export async function scanFileContent(file: File): Promise<{
+  isSafe: boolean;
+  threats?: string[];
+}> {
+  try {
+    // 读取文件的前1KB进行基础恶意内容检测
+    const header = await readFileHeader(file, 1024);
+    const threats: string[] = [];
+    
+    // 检查是否包含可执行文件头
+    const executableSignatures = [
+      [0x4D, 0x5A],                 // PE/EXE header "MZ"
+      [0x7F, 0x45, 0x4C, 0x46],     // ELF header
+      [0xCA, 0xFE, 0xBA, 0xBE],     // Mach-O header
+      [0x50, 0x4B, 0x03, 0x04],     // ZIP header (可能包含恶意软件)
+    ];
+    
+    for (const signature of executableSignatures) {
+      if (matchesSignature(header, signature)) {
+        threats.push('检测到可执行文件特征');
+        break;
+      }
+    }
+    
+    // 转换为字符串检查脚本内容
+    const textContent = new TextDecoder('utf-8', { fatal: false }).decode(header.slice(0, 512));
+    const maliciousPatterns = [
+      /<script[^>]*>/i,
+      /javascript:/i,
+      /vbscript:/i,
+      /on\w+\s*=/i,
+      /eval\s*\(/i,
+      /document\.write/i,
+      /iframe/i,
+      /base64/i
+    ];
+    
+    for (const pattern of maliciousPatterns) {
+      if (pattern.test(textContent)) {
+        threats.push('检测到可疑脚本内容');
+        break;
+      }
+    }
+    
+    return {
+      isSafe: threats.length === 0,
+      threats: threats.length > 0 ? threats : undefined
+    };
+    
+  } catch (error) {
+    // 如果无法扫描，保守起见认为不安全
+    return {
+      isSafe: false,
+      threats: ['无法扫描文件内容']
+    };
+  }
+}
+
+/**
+ * 验证文件类型（旧版本兼容）
  * @param file 文件对象
  * @returns 是否为支持的文件类型
  */
@@ -337,7 +604,81 @@ export function sanitizeFileName(fileName: string): string {
 }
 
 /**
- * 验证音频文件（综合验证）
+ * 综合文件安全验证（新增强版本）
+ * @param file 文件对象
+ * @param maxSizeMB 最大文件大小（MB）
+ * @returns Promise<验证结果>
+ */
+export async function validateFileSecurity(file: File, maxSizeMB: number = 50): Promise<{
+  isValid: boolean;
+  error?: string;
+  warnings?: string[];
+  detectedType?: string;
+}> {
+  const warnings: string[] = [];
+  
+  // 1. 基础验证
+  if (!file) {
+    return { isValid: false, error: '未提供文件' };
+  }
+  
+  if (file.size === 0) {
+    return { isValid: false, error: '文件为空' };
+  }
+  
+  // 2. 文件名安全检查
+  const fileNameValidation = validateFileName(file.name);
+  if (!fileNameValidation.isValid) {
+    return { isValid: false, error: fileNameValidation.error };
+  }
+  
+  // 3. 文件大小检查
+  if (!validateFileSize(file, maxSizeMB)) {
+    return { 
+      isValid: false, 
+      error: `文件大小超过限制（最大${maxSizeMB}MB）` 
+    };
+  }
+  
+  // 4. 魔数和MIME类型验证
+  const signatureValidation = await validateFileSignature(file);
+  if (!signatureValidation.isValid) {
+    return { 
+      isValid: false, 
+      error: signatureValidation.error 
+    };
+  }
+  
+  // 5. 恶意内容扫描
+  const contentScan = await scanFileContent(file);
+  if (!contentScan.isSafe) {
+    return { 
+      isValid: false, 
+      error: `安全威胁检测: ${contentScan.threats?.join(', ')}` 
+    };
+  }
+  
+  // 6. 文件大小合理性检查
+  if (file.size > 200 * 1024 * 1024) { // 200MB
+    warnings.push('文件较大，上传和处理时间可能较长');
+  }
+  
+  // 7. MIME类型一致性检查
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  const expectedMimeTypes = FILE_SIGNATURES[extension as keyof typeof FILE_SIGNATURES]?.mimeTypes || [];
+  if (!expectedMimeTypes.includes(file.type)) {
+    warnings.push(`MIME类型可能不准确: ${file.type}`);
+  }
+  
+  return {
+    isValid: true,
+    detectedType: signatureValidation.detectedType,
+    warnings: warnings.length > 0 ? warnings : undefined
+  };
+}
+
+/**
+ * 验证音频文件（综合验证）- 保持向后兼容
  * @param file 文件对象
  * @returns 验证结果对象
  */

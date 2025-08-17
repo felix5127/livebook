@@ -3,6 +3,13 @@ import { kimiClient, ChatMessage } from '@/lib/kimi';
 
 export async function POST(request: NextRequest) {
   try {
+    // 获取认证信息（由中间件添加）
+    const userId = request.headers.get('x-user-id') || 'anonymous';
+    const userEmail = request.headers.get('x-user-email') || '';
+    const authMethod = request.headers.get('x-auth-method') || 'none';
+
+    console.log(`[AI Chat] 认证信息: 用户ID=${userId}, 邮箱=${userEmail}, 认证方式=${authMethod}`);
+
     const body = await request.json();
     const { messages, context } = body;
 

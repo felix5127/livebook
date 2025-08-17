@@ -14,6 +14,13 @@ export async function GET(
   { params }: RouteParams
 ) {
   try {
+    // 获取认证信息（由中间件添加）
+    const userId = request.headers.get('x-user-id') || 'anonymous';
+    const userEmail = request.headers.get('x-user-email') || '';
+    const authMethod = request.headers.get('x-auth-method') || 'none';
+
+    console.log(`[API Tasks] 认证信息: 用户ID=${userId}, 邮箱=${userEmail}, 认证方式=${authMethod}`);
+
     const { id } = params;
 
     if (!id) {

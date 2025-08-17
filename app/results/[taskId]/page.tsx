@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Download, Copy, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 
@@ -41,6 +41,7 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchResult = async () => {
     try {
@@ -54,7 +55,7 @@ export default function ResultsPage() {
         
         // 如果任务还在进行中，继续轮询
         if (data.data.status === 'pending' || data.data.status === 'processing') {
-          setTimeout(fetchResult, 3000); // 3秒后再次查询
+          pollingTimeoutRef.current = setTimeout(fetchResult, 3000); // 3秒后再次查询
         }
       } else {
         setError(data.error || '获取结果失败');
@@ -71,6 +72,15 @@ export default function ResultsPage() {
     if (taskId) {
       fetchResult();
     }
+    
+    // 清理函数：组件卸载时清理轮询定时器
+    return () => {
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+        console.log('[结果页] 组件卸载，清理轮询定时器');
+      }
+    };
   }, [taskId]);
 
   const formatTime = (milliseconds: number) => {

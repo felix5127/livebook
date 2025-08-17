@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Play, Pause, Volume2, Download, Copy, MessageSquare, Send } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Volume2, Download, Copy, MessageSquare, Send, Languages } from 'lucide-react';
 
 export default function NotebookPage() {
   const params = useParams();
@@ -238,9 +238,10 @@ export default function NotebookPage() {
               const segments = data.data.result?.segments || data.data.transcripts?.[0]?.sentences;
               if (segments && segments.length > 0) {
                 console.log('[AI总结] 缓存损坏，生成新总结');
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
                   generateAiSummaryWithData(segments);
                 }, 100);
+                timeoutsRef.current.add(timeoutId);
               }
             }
           } else {
@@ -248,9 +249,10 @@ export default function NotebookPage() {
             const segments = data.data.result?.segments || data.data.transcripts?.[0]?.sentences;
             if (segments && segments.length > 0) {
               console.log('[AI总结] 生成新总结，segments数量:', segments.length);
-              setTimeout(() => {
+              const timeoutId = setTimeout(() => {
                 generateAiSummaryWithData(segments);
               }, 100);
+              timeoutsRef.current.add(timeoutId);
             }
           }
         } else {
@@ -269,6 +271,18 @@ export default function NotebookPage() {
       fetchTranscriptData();
     }
   }, [notebookId]);
+
+  // 组件卸载时清理所有定时器
+  useEffect(() => {
+    return () => {
+      // 清理所有定时器
+      timeoutsRef.current.forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+      timeoutsRef.current.clear();
+      console.log('[笔记本页] 组件卸载，清理所有定时器');
+    };
+  }, []);
 
   // 动态设置音频源
   useEffect(() => {
@@ -295,7 +309,8 @@ export default function NotebookPage() {
               } catch (error) {
                 console.error(`音频加载失败 (重试 ${retryCount + 1}/3):`, error);
                 if (retryCount < 2) {
-                  setTimeout(() => loadAudioWithRetry(retryCount + 1), 1000);
+                  const timeoutId = setTimeout(() => loadAudioWithRetry(retryCount + 1), 1000);
+                  timeoutsRef.current.add(timeoutId);
                 } else {
                   console.error('音频加载最终失败，已达到最大重试次数');
                   setAudioReady(false);
@@ -466,7 +481,8 @@ export default function NotebookPage() {
             audioRef.src = audioUrl;
             audioRef.load();
             // 等待加载完成后再播放
-            setTimeout(() => handlePlayPause(), 1000);
+            const timeoutId = setTimeout(() => handlePlayPause(), 1000);
+            timeoutsRef.current.add(timeoutId);
             return;
           } else {
             throw new Error('无法获取音频URL');
@@ -655,9 +671,10 @@ export default function NotebookPage() {
   const showToastMessage = (message: string) => {
     setToastMessage(message);
     setShowToast(true);
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       setShowToast(false);
     }, 3000);
+    timeoutsRef.current.add(timeoutId);
   };
 
 
@@ -787,6 +804,25 @@ export default function NotebookPage() {
   // 字幕分组功能
   const [isGroupedView, setIsGroupedView] = useState(false);
   
+  // 翻译功能状态
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingSegments, setTranslatingSegments] = useState<Set<string>>(new Set());
+  const [targetLanguage, setTargetLanguage] = useState('en');
+  
+  // 定时器引用管理
+  const timeoutsRef = useRef<Set<NodeJS.Timeout>>(new Set());
+  
+  // 辅助函数：创建带清理的定时器
+  const createManagedTimeout = (callback: () => void, delay: number): NodeJS.Timeout => {
+    const timeoutId = setTimeout(() => {
+      callback();
+      timeoutsRef.current.delete(timeoutId); // 执行完成后从set中移除
+    }, delay);
+    timeoutsRef.current.add(timeoutId);
+    return timeoutId;
+  };
+  
   // 说话人颜色配置
   const getSpeakerStyle = (speakerId: string) => {
     const speakerIndex = parseInt(speakerId) || 0;
@@ -870,6 +906,85 @@ export default function NotebookPage() {
     
     // 显示分享选项弹窗
     setShowShareOptions(true);
+  };
+
+  // 翻译功能
+  const translateSegment = async (segmentId: string, text: string) => {
+    if (translations[segmentId] || translatingSegments.has(segmentId)) {
+      return;
+    }
+
+    setTranslatingSegments(prev => new Set(prev).add(segmentId));
+
+    try {
+      const response = await fetch('/api/ai/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: text,
+          targetLanguage: targetLanguage
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('翻译请求失败');
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setTranslations(prev => ({
+          ...prev,
+          [segmentId]: data.data.translatedText
+        }));
+      } else {
+        throw new Error(data.error || '翻译失败');
+      }
+    } catch (error: any) {
+      console.error('翻译失败:', error);
+      showToastMessage(`翻译失败: ${error.message}`);
+    } finally {
+      setTranslatingSegments(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(segmentId);
+        return newSet;
+      });
+    }
+  };
+
+  // 批量翻译所有可见的字幕
+  const translateAllSegments = async () => {
+    const segments = getSegments();
+    if (!segments || segments.length === 0) {
+      showToastMessage('没有可翻译的内容');
+      return;
+    }
+
+    showToastMessage('开始批量翻译...');
+    
+    // 限制并发翻译数量避免API限制
+    const batchSize = 3;
+    for (let i = 0; i < segments.length; i += batchSize) {
+      const batch = segments.slice(i, i + batchSize);
+      const promises = batch.map((segment: any) => {
+        const segmentId = segment.id || `${segment.start_time}_${segment.end_time}`;
+        return translateSegment(segmentId, segment.text);
+      });
+      
+      await Promise.all(promises);
+      
+      // 添加小延迟避免API限制
+      if (i + batchSize < segments.length) {
+        await new Promise(resolve => {
+          const timeoutId = setTimeout(resolve, 1000);
+          timeoutsRef.current.add(timeoutId);
+        });
+      }
+    }
+    
+    showToastMessage('批量翻译完成！');
   };
 
   // 社交媒体分享
@@ -1263,6 +1378,46 @@ export default function NotebookPage() {
               <button className="px-3 py-1 text-sm text-blue-600 border border-blue-600 rounded-md hover:bg-blue-50">
                 AI校对
               </button>
+              
+              {/* 翻译控制 */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setShowTranslation(!showTranslation)}
+                  className={`flex items-center space-x-1 px-3 py-1 text-sm rounded-md transition-colors ${
+                    showTranslation 
+                      ? 'bg-green-100 text-green-700 border border-green-200' 
+                      : 'text-gray-600 border border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <Languages className="w-4 h-4" />
+                  <span>{showTranslation ? '隐藏翻译' : '显示翻译'}</span>
+                </button>
+                
+                {showTranslation && (
+                  <>
+                    <select
+                      value={targetLanguage}
+                      onChange={(e) => setTargetLanguage(e.target.value)}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="en">英语</option>
+                      <option value="ja">日语</option>
+                      <option value="ko">韩语</option>
+                      <option value="fr">法语</option>
+                      <option value="de">德语</option>
+                      <option value="es">西班牙语</option>
+                      <option value="ru">俄语</option>
+                    </select>
+                    
+                    <button
+                      onClick={translateAllSegments}
+                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                      全部翻译
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             
             <div className="flex items-center space-x-2">
@@ -1334,9 +1489,38 @@ export default function NotebookPage() {
                       <div className={`text-xs mb-1 font-medium ${getSpeakerStyle(segment.speaker_id).textColor}`}>
                         {getSpeakerStyle(segment.speaker_id).name}
                       </div>
-                      <p className="text-gray-900 leading-relaxed">
+                      <p className="text-gray-900 leading-relaxed mb-2">
                         {segment.text}
                       </p>
+                      
+                      {/* 翻译内容 */}
+                      {showTranslation && (() => {
+                        const segmentId = segment.id || `${segment.start_time}_${segment.end_time}`;
+                        const isTranslating = translatingSegments.has(segmentId);
+                        const translation = translations[segmentId];
+                        
+                        return (
+                          <div className="mt-2 pt-2 border-t border-gray-100">
+                            {isTranslating ? (
+                              <div className="flex items-center space-x-2 text-sm text-gray-500">
+                                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                <span>翻译中...</span>
+                              </div>
+                            ) : translation ? (
+                              <p className="text-sm text-gray-600 italic leading-relaxed">
+                                {translation}
+                              </p>
+                            ) : (
+                              <button
+                                onClick={() => translateSegment(segmentId, segment.text)}
+                                className="text-xs text-blue-600 hover:text-blue-800 underline"
+                              >
+                                点击翻译
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))
@@ -1370,9 +1554,40 @@ export default function NotebookPage() {
                           >
                             {formatTime(Math.floor(segment.start_time / 1000))}
                           </button>
-                          <p className="text-gray-800 leading-relaxed flex-1">
-                            {segment.text}
-                          </p>
+                          <div className="flex-1">
+                            <p className="text-gray-800 leading-relaxed mb-2">
+                              {segment.text}
+                            </p>
+                            
+                            {/* 翻译内容 */}
+                            {showTranslation && (() => {
+                              const segmentId = segment.id || `${segment.start_time}_${segment.end_time}`;
+                              const isTranslating = translatingSegments.has(segmentId);
+                              const translation = translations[segmentId];
+                              
+                              return (
+                                <div className="mt-2 pt-2 border-t border-gray-100">
+                                  {isTranslating ? (
+                                    <div className="flex items-center space-x-2 text-sm text-gray-500">
+                                      <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                      <span>翻译中...</span>
+                                    </div>
+                                  ) : translation ? (
+                                    <p className="text-sm text-gray-600 italic leading-relaxed">
+                                      {translation}
+                                    </p>
+                                  ) : (
+                                    <button
+                                      onClick={() => translateSegment(segmentId, segment.text)}
+                                      className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                    >
+                                      点击翻译
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
                         </div>
                       ))}
                     </div>

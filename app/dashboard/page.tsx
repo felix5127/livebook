@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Settings, FileAudio, Clock, User, PlayCircle, Trash2, LogIn, LogOut } from 'lucide-react';
 import FileUploader from '@/components/FileUploader';
@@ -62,6 +62,7 @@ export default function HomePage() {
   const [processingTasks, setProcessingTasks] = useState<ProcessingTask[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [activePolls, setActivePolls] = useState<Set<string>>(new Set());
+  const pollingTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const [deleteModal, setDeleteModal] = useState<{show: boolean, notebookId: string, notebookTitle: string}>({
     show: false,
     notebookId: '',
@@ -205,6 +206,18 @@ export default function HomePage() {
       localStorage.setItem('processingTasks', JSON.stringify(processingTasks));
     }
   }, [processingTasks, isLoaded]);
+
+  // 组件卸载时清理所有轮询定时器
+  useEffect(() => {
+    return () => {
+      // 清理所有轮询定时器
+      pollingTimeouts.current.forEach((timeoutId, taskId) => {
+        clearTimeout(timeoutId);
+        console.log('[首页] 组件卸载，清理轮询定时器:', taskId);
+      });
+      pollingTimeouts.current.clear();
+    };
+  }, []);
 
   // 保存笔记本到localStorage  
   useEffect(() => {
@@ -417,34 +430,46 @@ export default function HomePage() {
               }
               return prev;
             });
-            // 清理轮询状态
+            // 清理轮询状态和定时器
             setActivePolls(prev => {
               const newSet = new Set(prev);
               newSet.delete(taskId);
               return newSet;
             });
+            const timeoutId = pollingTimeouts.current.get(taskId);
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              pollingTimeouts.current.delete(taskId);
+            }
             console.log('[首页] 任务完成，停止轮询:', taskId);
             return; // 停止轮询
           }
           
           // 如果失败，更新状态并停止轮询
           if (status === 'failed') {
-            // 清理轮询状态
+            // 清理轮询状态和定时器
             setActivePolls(prev => {
               const newSet = new Set(prev);
               newSet.delete(taskId);
               return newSet;
             });
+            const timeoutId = pollingTimeouts.current.get(taskId);
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              pollingTimeouts.current.delete(taskId);
+            }
             console.log('[首页] 任务失败，停止轮询:', taskId);
             return;
           }
           
           // 继续轮询
-          setTimeout(checkStatus, 3000);
+          const timeoutId = setTimeout(checkStatus, 3000);
+          pollingTimeouts.current.set(taskId, timeoutId);
         }
       } catch (error) {
         console.error('轮询任务状态失败:', error);
-        setTimeout(checkStatus, 5000); // 错误时延长间隔
+        const timeoutId = setTimeout(checkStatus, 5000); // 错误时延长间隔
+        pollingTimeouts.current.set(taskId, timeoutId);
       }
     };
     
