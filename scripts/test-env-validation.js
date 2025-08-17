@@ -96,9 +96,10 @@ function runTest(scenario) {
     // 创建测试环境文件
     createEnvFile(scenario.env);
     
-    // 运行验证测试（使用Node.js直接测试验证逻辑）
+    // 运行验证测试（创建临时测试文件）
+    const testScriptPath = path.join(__dirname, 'temp-test.js');
     const testScript = `
-      const { validateEnv } = require('./lib/env-validation');
+      const { validateEnv } = require('../lib/env-validation');
       try {
         const env = validateEnv();
         console.log('VALIDATION_SUCCESS');
@@ -108,11 +109,16 @@ function runTest(scenario) {
       }
     `;
     
-    const result = execSync(`node -e "${testScript}"`, { 
+    fs.writeFileSync(testScriptPath, testScript);
+    
+    const result = execSync(`node ${testScriptPath}`, { 
       cwd: path.join(__dirname, '..'),
       encoding: 'utf8',
       stdio: 'pipe'
     });
+    
+    // 清理临时文件
+    fs.unlinkSync(testScriptPath);
     
     const success = result.includes('VALIDATION_SUCCESS');
     

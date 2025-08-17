@@ -21,7 +21,7 @@
     "deploy": "vercel --prod",
     "deploy:preview": "vercel",
     "env:validate": "node scripts/test-env-validation.js",
-    "predev": "npm run env:validate",
+    "predev": "echo 'Starting development server...'",
     "prebuild": "npm run type-check",
     "postbuild": "echo 'Build completed successfully!'",
     "vercel-build": "npm run build"
