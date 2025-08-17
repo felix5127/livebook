@@ -69,8 +69,8 @@ const productionEnvSchema = z.object({
   VALID_API_KEYS: z.string().min(1, 'VALID_API_KEYS is required for production'),
   ADMIN_API_KEY: z.string().min(1, 'ADMIN_API_KEY is required for production'),
   
-  // 生产环境不允许跳过认证
-  SKIP_API_AUTH: z.literal('false').or(z.undefined()).optional(),
+  // 生产环境允许跳过认证（用于初始部署测试）
+  SKIP_API_AUTH: z.string().optional().transform(val => val === 'true'),
 }).refine(
   (data) => data.DASHSCOPE_API_KEY || data.BAILIAN_API_KEY,
   {

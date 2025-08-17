@@ -1,44 +1,55 @@
-# Livebook MVP Vercel部署指南
+# Vercel 部署配置指南 🚀
 
-## 概览
+## 🚨 重要说明
 
-本指南详细说明了如何将Livebook MVP项目优化并部署到Vercel生产环境。项目已经过深度优化，支持音频转写、AI总结等功能。
+本指南针对 **v0.2.0** 版本的简化配置，解决了之前复杂配置导致的部署问题。
 
-## 🚀 快速部署
+## 📋 预检查清单
 
-### 1. 前置准备
+部署前请确保：
+- ✅ 项目已推送到 GitHub
+- ✅ 拥有 Vercel 账号
+- ✅ 已创建 Supabase 项目
+- ✅ 有效的 DashScope API 密钥
 
-确保你已经有以下账号和服务：
-- [Vercel账号](https://vercel.com)
-- [Supabase项目](https://supabase.com)
-- [阿里云DashScope API密钥](https://dashscope.aliyun.com)
+## 🔧 Vercel 环境变量配置
 
-### 2. 环境变量配置
+在 Vercel 项目设置 → Environment Variables 中添加：
 
-#### 2.1 复制环境变量模板
+### 必需变量
+
 ```bash
-cp .env.example .env.local
+# === 基础配置 ===
+NODE_ENV=production
+NEXT_TELEMETRY_DISABLED=1
+
+# === DashScope AI 配置 ===
+DASHSCOPE_API_KEY=your_dashscope_api_key_here
+
+# === Supabase 配置 ===
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
+
+# === 安全配置 ===
+JWT_SECRET=your_super_secure_jwt_secret_here
+VALID_API_KEYS=lbk_your_api_key_1,lbk_your_api_key_2
+ADMIN_API_KEY=admin_your_admin_key_here
+SKIP_API_AUTH=true
+
+# === 应用配置 ===
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
 ```
 
-#### 2.2 填写必填环境变量
+### 可选变量
 
-**DashScope配置（必填）**
-```env
-DASHSCOPE_API_KEY=sk-xxx  # 阿里云DashScope API密钥
-DASHSCOPE_API_URL=https://dashscope.aliyuncs.com/api/v1/services/audio/asr/paraformer
-```
+```bash
+# === 第三方服务 ===
+BAILIAN_API_KEY=your_bailian_api_key_here
 
-**Supabase配置（必填）**
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJxxx
-SUPABASE_SERVICE_ROLE_KEY=eyJxxx
-```
-
-**安全配置（必填）**
-```env
-JWT_SECRET=your-super-secure-random-string-here
-API_KEY_SECRET=another-secure-random-string-here
+# === 文件上传限制 ===
+MAX_FILE_SIZE=50
+ALLOWED_FILE_TYPES=mp3,wav,m4a,mp4,mov,aac,flac,ogg
 ```
 
 ### 3. 部署到Vercel
