@@ -50,14 +50,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 开发环境便利性设置
-  if (process.env.NODE_ENV === 'development') {
-    const skipAuth = process.env.SKIP_API_AUTH === 'true';
-    const isBypassPath = DEV_BYPASS_PATHS.some(path => pathname.startsWith(path));
-    
-    if (skipAuth || isBypassPath) {
-      return NextResponse.next();
-    }
+  // 环境便利性设置（支持开发和生产环境）
+  const skipAuth = process.env.SKIP_API_AUTH === 'true';
+  const isBypassPath = DEV_BYPASS_PATHS.some(path => pathname.startsWith(path));
+  
+  if (skipAuth || (process.env.NODE_ENV === 'development' && isBypassPath)) {
+    return NextResponse.next();
   }
 
   try {
@@ -308,10 +306,9 @@ function createRateLimitResponse(rateLimitResult: {
   return response;
 }
 
-// 中间件配置
+// 中间件配置 - 只处理API路由
 export const config = {
   matcher: [
-    '/api/:path*',
-    '/((?!_next/static|_next/image|favicon.ico|public/).*)'
+    '/api/:path*'
   ]
 };
