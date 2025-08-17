@@ -169,12 +169,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. 文件大小验证 (50MB)
-    if (!validateFileSize(file, 50)) {
+    // 4. 文件大小验证 (4MB for Vercel)
+    // Vercel限制：Function payload最大4.5MB，保留0.5MB缓冲
+    if (!validateFileSize(file, 4)) {
       return NextResponse.json(
         { 
           success: false, 
-          error: '文件大小超过限制（最大50MB）' 
+          error: '文件大小超过限制（最大4MB）' 
         },
         { status: 400 }
       );

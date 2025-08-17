@@ -1,5 +1,13 @@
 {
   "version": 2,
+  "functions": {
+    "app/api/upload/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/transcribe/route.ts": {
+      "maxDuration": 300
+    }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
